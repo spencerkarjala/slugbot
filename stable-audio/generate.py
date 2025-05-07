@@ -33,10 +33,10 @@ class ProgressWriter:
     Wraps a stream to capture tqdm-style progress bars (which use '\r')
     and write the latest line to a file on each carriage return.
     """
-    def __init__(self, stream: TextIO, fname: str):
+    def __init__(self, stream: TextIO, fname: str) -> None:
         self._stream = stream
         self._fname = fname
-    def write(self, data: str):
+    def write(self, data: str) -> None:
         # Forward incoming data back to the original stream
         self._stream.write(data)
 
@@ -50,7 +50,7 @@ class ProgressWriter:
                 f.write(data[1:].rstrip('\n'))
         except Exception:
             pass
-    def flush(self):
+    def flush(self) -> None:
         self._stream.flush()
 
 def get_project_dir(start_dir: Path = Path.cwd()) -> Path:
@@ -61,7 +61,7 @@ def get_project_dir(start_dir: Path = Path.cwd()) -> Path:
     raise FileNotFoundError(f"No project dir found as a parent of '{start_dir}'")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate audio with Stable Audio Open 1.0"
     )
