@@ -7,19 +7,19 @@ import (
 	"strconv"
 	"strings"
 
-	"slugbot/commands"
-	"slugbot/helpers"
+	"slugbot/internal/commands"
+	"slugbot/internal/helpers"
 )
 
-type PolarDistortCommand struct {
+type InverseBarrelDistortCommand struct {
 	commands.Command
 }
 
-func (c *PolarDistortCommand) Usage() string {
-	return "Usage: `.im polar <A>`"
+func (c *InverseBarrelDistortCommand) Usage() string {
+	return "Usage: `.im ibarrel <A> <B> <C> <D>`"
 }
 
-func (c *PolarDistortCommand) Validate() error {
+func (c *InverseBarrelDistortCommand) Validate() error {
 	if c.Session == nil {
 		return fmt.Errorf("invalid session reference")
 	}
@@ -29,28 +29,33 @@ func (c *PolarDistortCommand) Validate() error {
 
 	args := strings.Fields(c.Message.Content)
 
-	if len(args) != 3 {
+	if len(args) != 6 {
 		return errors.New(c.Usage())
 	}
 
-	if args[1] != "polar" {
+	if args[1] != "ibarrel" {
 		return errors.New(c.Usage())
 	}
 
-	if _, err := strconv.ParseFloat(args[2], 64); err != nil {
-		return errors.New(c.Usage())
+	for i := 2; i < 6; i++ {
+		if _, err := strconv.ParseFloat(args[i], 64); err != nil {
+			return errors.New(c.Usage())
+		}
 	}
 
 	return nil
 }
 
-func (cmd *PolarDistortCommand) Apply() error {
+func (cmd *InverseBarrelDistortCommand) Apply() error {
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
 
 	args := strings.Fields(cmd.Message.Content)
-	theta, _ := strconv.ParseFloat(args[2], 64)
+	a, _ := strconv.ParseFloat(args[2], 64)
+	b, _ := strconv.ParseFloat(args[3], 64)
+	c, _ := strconv.ParseFloat(args[4], 64)
+	d, _ := strconv.ParseFloat(args[5], 64)
 
 	inFile, outFile, cleanup, err := helpers.PrepareImageFiles(cmd.Session, cmd.Message)
 	if err != nil {
@@ -62,8 +67,8 @@ func (cmd *PolarDistortCommand) Apply() error {
 		"magick",
 		inFile,
 		"-distort",
-		"Polar",
-		fmt.Sprintf("%f", theta),
+		"BarrelInverse",
+		fmt.Sprintf("%f %f %f %f", a, b, c, d),
 		outFile,
 	)
 	fmt.Println("Running command:", strings.Join(command.Args, " "))

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"slugbot/commands"
+	"slugbot/internal/commands"
 )
 
 type StableAudioCommand struct {

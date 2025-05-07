@@ -7,19 +7,19 @@ import (
 	"strconv"
 	"strings"
 
-	"slugbot/commands"
-	"slugbot/helpers"
+	"slugbot/internal/commands"
+	"slugbot/internal/helpers"
 )
 
-type ArcDistortCommand struct {
+type InversePolarDistortCommand struct {
 	commands.Command
 }
 
-func (c *ArcDistortCommand) Usage() string {
-	return "Usage: `.im arc <A> <B> <C> <D>`"
+func (c *InversePolarDistortCommand) Usage() string {
+	return "Usage: `.im ipolar <A>`"
 }
 
-func (c *ArcDistortCommand) Validate() error {
+func (c *InversePolarDistortCommand) Validate() error {
 	if c.Session == nil {
 		return fmt.Errorf("invalid session reference")
 	}
@@ -33,7 +33,7 @@ func (c *ArcDistortCommand) Validate() error {
 		return errors.New(c.Usage())
 	}
 
-	if args[1] != "arc" {
+	if args[1] != "ipolar" {
 		return errors.New(c.Usage())
 	}
 
@@ -44,7 +44,7 @@ func (c *ArcDistortCommand) Validate() error {
 	return nil
 }
 
-func (cmd *ArcDistortCommand) Apply() error {
+func (cmd *InversePolarDistortCommand) Apply() error {
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
@@ -62,7 +62,7 @@ func (cmd *ArcDistortCommand) Apply() error {
 		"magick",
 		inFile,
 		"-distort",
-		"Arc",
+		"DePolar",
 		fmt.Sprintf("%f", theta),
 		outFile,
 	)

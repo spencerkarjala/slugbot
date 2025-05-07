@@ -1,7 +1,6 @@
 package helpers
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -42,9 +41,6 @@ func GetMessageImageURL(message *discordgo.Message) string {
 		}
 	}
 	for _, embed := range message.Embeds {
-		b, _ := json.MarshalIndent(embed, "", "  ")
-		fmt.Println(string(b))
-		fmt.Println(embed.Type)
 		if imageURL := GetEmbedImageURL(embed); imageURL != "" {
 			return imageURL
 		}
@@ -90,7 +86,6 @@ func GetImageFromRecentChatHistory(session *discordgo.Session, message *discordg
 
 	return "", fmt.Errorf("no image found in recent chat history")
 }
-
 func GetImageReference(session *discordgo.Session, message *discordgo.MessageCreate) (string, error) {
 	if message.Author.Bot {
 		return "", fmt.Errorf("no image found")

@@ -10,9 +10,9 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/zalando/go-keyring"
 
-	"slugbot/commands"
-	"slugbot/commands/audio"
-	"slugbot/commands/image"
+	"slugbot/internal/commands"
+	"slugbot/internal/commands/audio"
+	"slugbot/internal/commands/image"
 )
 
 // Create mapping from command strings to factory functions for each command type
