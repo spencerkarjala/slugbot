@@ -42,7 +42,7 @@ class ProgressWriter:
 
         # If it doesn't start with a carriage return, it's probably not a progress bar,
         # so just skip it
-        if data[0] != '\r':
+        if not data or data[0] != '\r':
             return
         
         try:
