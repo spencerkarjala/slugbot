@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"test-discord-bot/commands"
+	"slugbot/commands"
 )
 
 type StableAudioCommand struct {

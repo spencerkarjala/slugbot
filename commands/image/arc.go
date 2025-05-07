@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"test-discord-bot/commands"
-	"test-discord-bot/helpers"
+	"slugbot/commands"
+	"slugbot/helpers"
 )
 
 type ArcDistortCommand struct {

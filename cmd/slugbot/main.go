@@ -10,9 +10,9 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/zalando/go-keyring"
 
-	"test-discord-bot/commands"
-	"test-discord-bot/commands/audio"
-	"test-discord-bot/commands/image"
+	"slugbot/commands"
+	"slugbot/commands/audio"
+	"slugbot/commands/image"
 )
 
 // Create mapping from command strings to factory functions for each command type
@@ -96,7 +96,7 @@ func loadDiscordToken() (string, error) {
 func main() {
 	token, err := loadDiscordToken()
 	if err != nil {
-		fmt.Println("error lodaing Discord token, ", err)
+		fmt.Println("error loading Discord token, ", err)
 	}
 
 	dg, err := discordgo.New("Bot " + token)

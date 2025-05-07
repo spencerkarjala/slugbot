@@ -1,4 +1,4 @@
-module test-discord-bot
+module slugbot
 
 go 1.24.1
 
