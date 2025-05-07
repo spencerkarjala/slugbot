@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/signal"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/zalando/go-keyring"
 
 	"test-discord-bot/commands"
 	"test-discord-bot/commands/audio"
@@ -75,8 +77,27 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 	}
 }
 
+func loadDiscordToken() (string, error) {
+	token, err := keyring.Get("slugbot-production", "token")
+	if err == keyring.ErrNotFound {
+		fmt.Print("Enter your Discord API token:")
+		input, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		input = strings.TrimSpace(input)
+		if err := keyring.Set("slugbot-production", "token", input); err != nil {
+			return "", fmt.Errorf("couldn't save token: %w", err)
+		}
+		return input, nil
+	} else if err != nil {
+		return "", fmt.Errorf("couldn't retrieve token: %w", err)
+	}
+	return token, nil
+}
+
 func main() {
-	token := ""
+	token, err := loadDiscordToken()
+	if err != nil {
+		fmt.Println("error lodaing Discord token, ", err)
+	}
 
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
