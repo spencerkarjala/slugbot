@@ -6,7 +6,11 @@ Usage (after creating a Conda env at ./.conda-env):
   conda run --prefix ./.conda-env python stable-audio/generate.py \
       --prompt "128 BPM tech house drum loop" --output output.wav
 """
+import atexit
 import os
+import sys
+from typing import TextIO
+
 # Reduce fragmentation in PyTorch allocator
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -23,6 +27,31 @@ from stable_audio_tools.inference.generation import generate_diffusion_cond
 
 MODEL_CONFIG_PATH = "models/stable-audio-open-1.0/model_config.json"
 MODEL_CHECKPOINT_PATH = "models/stable-audio-open-1.0/model.ckpt"
+
+class ProgressWriter:
+    """
+    Wraps a stream to capture tqdm-style progress bars (which use '\r')
+    and write the latest line to a file on each carriage return.
+    """
+    def __init__(self, stream: TextIO, fname: str):
+        self._stream = stream
+        self._fname = fname
+    def write(self, data: str):
+        # Forward incoming data back to the original stream
+        self._stream.write(data)
+
+        # If it doesn't start with a carriage return, it's probably not a progress bar,
+        # so just skip it
+        if data[0] != '\r':
+            return
+        
+        try:
+            with open(self._fname, 'w') as f:
+                f.write(data[1:].rstrip('\n'))
+        except Exception:
+            pass
+    def flush(self):
+        self._stream.flush()
 
 def get_project_dir(start_dir: Path = Path.cwd()) -> Path:
     """Walk upward until a .git directory is found"""
@@ -42,7 +71,22 @@ def main():
     parser.add_argument("--steps", type=int, default=100, help="Number of diffusion steps")
     parser.add_argument("--cfg_scale", type=float, default=7.0, help="CFG scale")
     parser.add_argument("--sampler", default="dpmpp-3m-sde", help="Sampler type")
+    parser.add_argument("--progress_file", default="", help="File to write progress output to")
     args = parser.parse_args()
+
+    # If a progress file was indicated, create it to track progress, then delete it on cleanup
+    if args.progress_file:
+        try:
+            open(args.progress_file, 'w').close()
+        except Exception:
+            pass
+        def _cleanup():
+            try:
+                os.remove(args.progress_file)
+            except OSError:
+                pass
+        atexit.register(_cleanup)
+        sys.stderr = ProgressWriter(sys.stderr, args.progress_file)
 
     # Select device
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
