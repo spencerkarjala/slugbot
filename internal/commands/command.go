@@ -14,9 +14,14 @@ func (c *Command) SetContext(s *discordgo.Session, m *discordgo.MessageCreate) {
 	c.Message = m
 }
 
+func (c *Command) HandleError(err error) {
+	c.Session.ChannelMessageSend(c.Message.ChannelID, "Error occurred while processing: "+err.Error())
+}
+
 type CommandHandler interface {
 	SetContext(s *discordgo.Session, m *discordgo.MessageCreate)
 	Usage() string
 	Validate() error
 	Apply() error
+	HandleError(error)
 }

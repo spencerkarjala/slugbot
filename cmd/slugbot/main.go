@@ -13,6 +13,7 @@ import (
 	"slugbot/internal/commands"
 	"slugbot/internal/commands/audio"
 	"slugbot/internal/commands/image"
+	"slugbot/internal/exec"
 )
 
 // Create mapping from command strings to factory functions for each command type
@@ -24,6 +25,8 @@ var commandHandlers = map[string]func() commands.CommandHandler{
 	"ipolar":  func() commands.CommandHandler { return &image.InversePolarDistortCommand{} },
 	".saudio": func() commands.CommandHandler { return &audio.StableAudioCommand{} },
 }
+
+var audioQueue = exec.NewTaskQueue()
 
 func getCommandList() string {
 	var keys []string
@@ -51,10 +54,7 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 		}
 		command := commandConstructor()
 		command.SetContext(session, message)
-		if err := command.Apply(); err != nil {
-			session.ChannelMessageSend(message.ChannelID, "Error occurred while processing: "+err.Error())
-			return
-		}
+		audioQueue.Enqueue(command)
 		return
 	}
 
