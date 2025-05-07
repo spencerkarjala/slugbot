@@ -1,3 +1,4 @@
 .conda-env
 *.wav
+*.zip
 models/
