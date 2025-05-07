@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# bin/sag — “Stable Audio Generate” launcher
+
+MYDIR="$(cd "$(dirname "$0")/.." && pwd)"
+PY="$MYDIR/.conda-env/bin/python"
+
+exec "$PY" "$MYDIR/stable-audio/generate.py" "$@"

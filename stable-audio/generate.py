@@ -1,0 +1,121 @@
+#!/usr/bin/env python
+"""
+Generate audio using Stability AI's Stable Audio Open 1.0 model.
+
+Usage (after creating a Conda env at ./.conda-env):
+  conda run --prefix ./.conda-env python stable-audio/generate.py \
+      --prompt "128 BPM tech house drum loop" --output output.wav
+"""
+import os
+# Reduce fragmentation in PyTorch allocator
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+import argparse
+import json
+from pathlib import Path
+import torch
+import torchaudio
+from einops import rearrange
+from stable_audio_tools.models.factory import create_model_from_config
+from stable_audio_tools.models.utils import load_ckpt_state_dict
+from stable_audio_tools.training.utils import copy_state_dict
+from stable_audio_tools.inference.generation import generate_diffusion_cond
+
+MODEL_CONFIG_PATH = "models/stable-audio-open-1.0/model_config.json"
+MODEL_CHECKPOINT_PATH = "models/stable-audio-open-1.0/model.ckpt"
+
+def get_project_dir(start_dir: Path = Path.cwd()) -> Path:
+    """Walk upward until a .git directory is found"""
+    for p in (start_dir, *start_dir.parents):
+        if (p / ".git").is_dir():
+            return p
+    raise FileNotFoundError(f"No project dir found as a parent of '{start_dir}'")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Generate audio with Stable Audio Open 1.0"
+    )
+    parser.add_argument("--prompt", required=True, help="Text prompt for audio generation")
+    parser.add_argument("--output", default="output.wav", help="Output WAV file path")
+    parser.add_argument("--length", type=float, default=30.0, help="Length in seconds")
+    parser.add_argument("--steps", type=int, default=100, help="Number of diffusion steps")
+    parser.add_argument("--cfg_scale", type=float, default=7.0, help="CFG scale")
+    parser.add_argument("--sampler", default="dpmpp-3m-sde", help="Sampler type")
+    args = parser.parse_args()
+
+    # Select device
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    print(f"Using device: {device}", flush=True)
+
+    project_dir = get_project_dir()
+
+    # Load model configuration
+    config_path = project_dir / MODEL_CONFIG_PATH
+    print(f"Loading model config from {config_path}", flush=True)
+    with open(config_path) as f:
+        model_config = json.load(f)
+
+    # Instantiate model
+    print("Creating model from config...", flush=True)
+    model = create_model_from_config(model_config)
+
+    # Load weights from local checkpoint
+    ckpt_path = project_dir / MODEL_CHECKPOINT_PATH
+    print(f"Loading checkpoint from {ckpt_path}", flush=True)
+    state_dict = load_ckpt_state_dict(str(ckpt_path))
+    copy_state_dict(model, state_dict)
+
+    # Move model to device, set precision, and disable gradients
+    model = model.to(device)
+    if device.type == "cuda":
+        model = model.half()
+    model.eval()
+    for p in model.parameters():
+        p.requires_grad = False
+
+    sample_rate = model_config.get("sample_rate")
+    sample_size = model_config.get("sample_size")
+
+    # Prepare conditioning
+    conditioning = [{
+        "prompt": args.prompt,
+        "seconds_start": 0,
+        "seconds_total": args.length,
+    }]
+
+    # Warm up GPU allocator
+    if device.type == "cuda": torch.cuda.empty_cache()
+
+    # Run generation without tracking gradients
+    print(f"Generating {args.length}s audio with {args.steps} steps...", flush=True)
+    with torch.no_grad():
+        output = generate_diffusion_cond(
+            model,
+            steps=args.steps,
+            cfg_scale=args.cfg_scale,
+            conditioning=conditioning,
+            sample_size=sample_size,
+            sample_rate=sample_rate,
+            sampler_type=args.sampler,
+            device=device,
+            sigma_min=0.3,
+            sigma_max=500,
+        )
+
+    # Free any unused GPU memory
+    if device.type == "cuda": torch.cuda.empty_cache()
+
+    # Reshape and normalize to PCM16
+    audio = rearrange(output, "b d n -> d (b n)")
+    audio = audio.to(torch.float32)
+    audio = audio.div(torch.max(torch.abs(audio))).clamp(-1, 1)
+    audio = audio.mul(32767).to(torch.int16).cpu()
+
+    # Save output
+    torchaudio.save(args.output, audio, sample_rate)
+    print(f"Saved audio to {args.output}", flush=True)
+
+
+if __name__ == "__main__":
+    main()
