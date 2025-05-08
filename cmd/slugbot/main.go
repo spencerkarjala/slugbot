@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/zalando/go-keyring"
@@ -26,7 +27,23 @@ var commandHandlers = map[string]func() commands.CommandHandler{
 	".saudio": func() commands.CommandHandler { return &audio.StableAudioCommand{} },
 }
 
-var audioQueue = exec.NewTaskQueue()
+var audioQueues = make(map[string]*exec.TaskQueue)
+var audioQueueViews = make(map[string]*exec.TaskQueueView)
+
+func UpdateQueueViewCallback(view *exec.TaskQueueView) {
+	if view == nil {
+		fmt.Fprintln(os.Stderr, "received nil view in UpdateQueueViewCallback")
+		return
+	}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		if err := view.Refresh(); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to refresh view in channel %s; %v\r\n", view.ChannelID, err)
+		}
+	}
+}
 
 func getCommandList() string {
 	var keys []string
@@ -54,7 +71,26 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 		}
 		command := commandConstructor()
 		command.SetContext(session, message)
+
+		// lazy create a new TaskQueue for the current channel
+		audioQueue, ok := audioQueues[message.ChannelID]
+		if !ok {
+			audioQueue = exec.NewTaskQueue()
+			audioQueues[message.ChannelID] = audioQueue
+		}
+
+		// lazy create a new TaskQueueView for the current channel
+		audioQueueView, ok := audioQueueViews[message.ChannelID]
+		if !ok {
+			audioQueueView = exec.NewTaskQueueView(audioQueue, session, message.ChannelID)
+			audioQueueViews[message.ChannelID] = audioQueueView
+
+			// if we create a TaskQueueView, we need to also create a goroutine to refresh it
+			go UpdateQueueViewCallback(audioQueueView)
+		}
+
 		audioQueue.Enqueue(command)
+		audioQueueView.Refresh()
 		return
 	}
 
