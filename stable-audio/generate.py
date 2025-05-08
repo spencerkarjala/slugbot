@@ -76,6 +76,7 @@ def main() -> None:
         description="Generate audio with Stable Audio Open 1.0"
     )
     parser.add_argument("--prompt", required=True, help="Text prompt for audio generation")
+    parser.add_argument("--negative_prompt", default="", help="Negative prompt for audio generation")
     parser.add_argument("--output", default="output.wav", help="Output WAV file path")
     parser.add_argument("--length", type=float, default=30.0, help="Length in seconds")
     parser.add_argument("--steps", type=int, default=100, help="Number of diffusion steps")
@@ -138,6 +139,15 @@ def main() -> None:
         "seconds_total": args.length,
     }]
 
+    # Prepare negative conditioning
+    negative_conditioning = None
+    if args.negative_prompt:
+        negative_conditioning = [{
+            "prompt": args.negative_prompt,
+            "seconds_start": 0,
+            "seconds_total": args.length,
+        }]
+
     # Warm up GPU allocator
     if device.type == "cuda": torch.cuda.empty_cache()
 
@@ -149,6 +159,7 @@ def main() -> None:
             steps=args.steps,
             cfg_scale=args.cfg_scale,
             conditioning=conditioning,
+            negative_conditioning=negative_conditioning,
             sample_size=sample_size,
             sample_rate=sample_rate,
             sampler_type=args.sampler,

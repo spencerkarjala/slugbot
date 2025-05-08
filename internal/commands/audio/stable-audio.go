@@ -22,9 +22,10 @@ type StableAudioCommand struct {
 }
 
 type StableAudioParams struct {
-	Length   float64
-	Strength float64
-	Prompt   string
+	Length         float64
+	Strength       float64
+	Prompt         string
+	NegativePrompt string
 }
 
 // SetContext captures Discord context and extracts the prompt text.
@@ -62,14 +63,17 @@ func (c *StableAudioCommand) Validate() error {
 
 func ParseArgs(args []string) (*StableAudioParams, error) {
 	params := &StableAudioParams{
-		Length:   30.0,
-		Strength: 7.0,
-		Prompt:   "",
+		Length:         30.0,
+		Strength:       7.0,
+		Prompt:         "",
+		NegativePrompt: "",
 	}
 
 	// parse params; TODO: make this more general/abstracted
 	i := 0
 	prompt := []string{}
+	negativePrompt := []string{}
+	collectNegative := false
 	for i < len(args) {
 		switch args[i] {
 		case "--length":
@@ -82,6 +86,7 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 			}
 			params.Length = length
 			i += 2
+
 		case "--strength":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("missing value for --strength")
@@ -92,17 +97,28 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 			}
 			params.Strength = strength
 			i += 2
+
+		case "--negative":
+			collectNegative = true
+			i++
+
 		default:
-			prompt = append(prompt, args[i])
+			if !collectNegative {
+				prompt = append(prompt, args[i])
+			} else {
+				negativePrompt = append(negativePrompt, args[i])
+			}
 			i++
 		}
 	}
 
 	params.Prompt = strings.Join(prompt, " ")
+	params.NegativePrompt = strings.Join(negativePrompt, " ")
 
-	slog.Info("Got prompt   ", params.Prompt)
-	slog.Info("    strength %0.2f", params.Strength)
-	slog.Info("    length   %0.2f", params.Length)
+	slog.Info("Got prompt:          ", params.Prompt)
+	slog.Info("Got negative prompt: ", params.NegativePrompt)
+	slog.Info("    strength:        %0.2f", params.Strength)
+	slog.Info("    length:          %0.2f", params.Length)
 
 	if params.Prompt == "" {
 		return nil, fmt.Errorf("prompt is empty")
@@ -135,7 +151,7 @@ func (cmd *StableAudioCommand) Apply() error {
 
 	initMsg, err := cmd.Session.ChannelMessageSendReply(
 		cmd.Message.ChannelID,
-		fmt.Sprintf("Generating audio for prompt: `%s`...", params.Prompt),
+		fmt.Sprintf("Generating audio for prompt: `%s`...\r\nnegative prompt: `%s`", params.Prompt, params.NegativePrompt),
 		triggeringMessage,
 	)
 	if err != nil {
@@ -175,8 +191,8 @@ func (cmd *StableAudioCommand) Apply() error {
 	// Invoke the Stable Audio CLI via Conda inside a login shell
 	// so that conda initialization is applied and the CLI command is found.
 	shellCmd := fmt.Sprintf(
-		"./stable-audio/sag --prompt %q --output %s --progress_file %s --cfg_scale %0.2f --length %0.2f",
-		params.Prompt, outFile, progressFile, params.Strength, params.Length,
+		"./stable-audio/sag --prompt %q --negative_prompt %q --output %s --progress_file %s --cfg_scale %0.2f --length %0.2f",
+		params.Prompt, params.NegativePrompt, outFile, progressFile, params.Strength, params.Length,
 	)
 	command := exec.Command("bash", "-lc", shellCmd)
 
