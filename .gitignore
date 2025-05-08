@@ -1,4 +1,5 @@
 .conda-env
+*.progress
 *.wav
 *.zip
 models/
