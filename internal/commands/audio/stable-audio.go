@@ -9,10 +9,26 @@ import (
 	"time"
 
 	"slugbot/internal/commands"
+	"slugbot/internal/commands/traits"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 type StableAudioCommand struct {
 	commands.Command
+	traits.Promptable
+}
+
+// SetContext captures Discord context and extracts the prompt text.
+func (c *StableAudioCommand) SetContext(s *discordgo.Session, m *discordgo.MessageCreate) {
+	c.Command.SetContext(s, m)
+	content := strings.TrimSpace(m.Content)
+	parts := strings.Split(content, " ")
+	if len(parts) > 1 {
+		c.Promptable.SetPrompt(strings.Join(parts[1:], " "))
+	} else {
+		c.Promptable.SetPrompt("")
+	}
 }
 
 func (c *StableAudioCommand) Usage() string {
@@ -41,17 +57,23 @@ func (cmd *StableAudioCommand) Apply() error {
 		return fmt.Errorf("validation failed: %w", err)
 	}
 
+	triggeringMessage := &discordgo.MessageReference{
+		MessageID: cmd.Message.ID,
+		ChannelID: cmd.Message.ChannelID,
+	}
+
 	content := strings.TrimSpace(cmd.Message.Content)
 	parts := strings.SplitN(content, " ", 2)
 	if len(parts) < 2 {
-		cmd.Session.ChannelMessageSend(cmd.Message.ChannelID, "Usage: .saudio <prompt>")
+		cmd.Session.ChannelMessageSendReply(cmd.Message.ChannelID, "Usage: .saudio <prompt>", triggeringMessage)
 		return nil
 	}
 	prompt := parts[1:]
 
-	initMsg, err := cmd.Session.ChannelMessageSend(
+	initMsg, err := cmd.Session.ChannelMessageSendReply(
 		cmd.Message.ChannelID,
 		fmt.Sprintf("Generating audio for prompt: `%s`...", strings.Join(prompt, " ")),
+		triggeringMessage,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to send initial message: %w", err)
@@ -106,12 +128,20 @@ func (cmd *StableAudioCommand) Apply() error {
 	// Send the resulting audio file back to the Discord channel
 	file, err := os.Open(outFile)
 	if err != nil {
-		cmd.Session.ChannelMessageSend(cmd.Message.ChannelID, "Failed to open output file: "+err.Error())
+		cmd.Session.ChannelMessageSendReply(cmd.Message.ChannelID, "Failed to open output file: "+err.Error(), triggeringMessage)
 		return err
 	}
 	defer file.Close()
 
-	if _, err := cmd.Session.ChannelFileSend(cmd.Message.ChannelID, outFile, file); err != nil {
+	finalMessage := &discordgo.MessageSend{
+		Files: []*discordgo.File{{
+			Name:   outFile,
+			Reader: file,
+		}},
+		Reference: triggeringMessage,
+	}
+
+	if _, err := cmd.Session.ChannelMessageSendComplex(cmd.Message.ChannelID, finalMessage); err != nil {
 		cmd.Session.ChannelMessageSend(cmd.Message.ChannelID, "Failed to send file: "+err.Error())
 		return err
 	}

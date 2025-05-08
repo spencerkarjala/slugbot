@@ -15,6 +15,7 @@ import (
 	"slugbot/internal/commands/audio"
 	"slugbot/internal/commands/image"
 	"slugbot/internal/exec"
+	"slugbot/internal/io/slog"
 )
 
 // Create mapping from command strings to factory functions for each command type
@@ -32,7 +33,7 @@ var audioQueueViews = make(map[string]*exec.TaskQueueView)
 
 func UpdateQueueViewCallback(view *exec.TaskQueueView) {
 	if view == nil {
-		fmt.Fprintln(os.Stderr, "received nil view in UpdateQueueViewCallback")
+		slog.Error("received nil view in UpdateQueueViewCallback")
 		return
 	}
 
@@ -40,7 +41,7 @@ func UpdateQueueViewCallback(view *exec.TaskQueueView) {
 	defer ticker.Stop()
 	for range ticker.C {
 		if err := view.Refresh(); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to refresh view in channel %s; %v\r\n", view.ChannelID, err)
+			slog.Error("failed to refresh view in channel %s; %v\r\n", view.ChannelID, err)
 		}
 	}
 }
@@ -72,25 +73,41 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 		command := commandConstructor()
 		command.SetContext(session, message)
 
-		// lazy create a new TaskQueue for the current channel
+		// need to validate input before we can save the prompt
+		if err := command.Validate(); err != nil {
+			session.ChannelMessageSend(message.ChannelID, command.Usage())
+			slog.Error("couldn't validate Stable Audio command: %v", err)
+			return
+		}
+
+		// command should be an audio-generation command, so leave if it's not Promptable
+		stableAudioCommand, ok := command.(*audio.StableAudioCommand)
+		if !ok {
+			slog.Fatal("somehow created a non-Stable-Audio command from .saudio prompt")
+			return
+		}
+
+		// finally, set the prompt
+		stableAudioCommand.SetPrompt(strings.Join(parts[1:], " "))
+
+		// lazily create a new TaskQueue for the current channel
 		audioQueue, ok := audioQueues[message.ChannelID]
 		if !ok {
 			audioQueue = exec.NewTaskQueue()
 			audioQueues[message.ChannelID] = audioQueue
 		}
 
-		// lazy create a new TaskQueueView for the current channel
-		audioQueueView, ok := audioQueueViews[message.ChannelID]
+		// lazily create a new TaskQueueView for the current channel
+		_, ok = audioQueueViews[message.ChannelID]
 		if !ok {
-			audioQueueView = exec.NewTaskQueueView(audioQueue, session, message.ChannelID)
+			audioQueueView := exec.NewTaskQueueView(audioQueue, session, message.ChannelID)
 			audioQueueViews[message.ChannelID] = audioQueueView
 
 			// if we create a TaskQueueView, we need to also create a goroutine to refresh it
 			go UpdateQueueViewCallback(audioQueueView)
 		}
 
-		audioQueue.Enqueue(command)
-		audioQueueView.Refresh()
+		audioQueue.Enqueue(stableAudioCommand)
 		return
 	}
 
@@ -132,12 +149,13 @@ func loadDiscordToken() (string, error) {
 func main() {
 	token, err := loadDiscordToken()
 	if err != nil {
-		fmt.Println("error loading Discord token, ", err)
+		slog.Error("error loading Discord token, ", err)
 	}
+	slog.SetLevel(slog.LevelTrace)
 
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
-		fmt.Println("error creating Discord session,", err)
+		slog.Error("error creating Discord session,", err)
 		return
 	}
 
@@ -145,7 +163,7 @@ func main() {
 
 	err = dg.Open()
 	if err != nil {
-		fmt.Println("error opening connection,", err)
+		slog.Error("error opening connection,", err)
 		return
 	}
 

@@ -1,20 +1,20 @@
 package traits
 
-// Promptable represents commands that carry user-entered text.
-type Promptable interface {
+// Promptable is a helper you can embed to implement PromptHandler.
+type Promptable struct {
+	prompt string
+}
+
+// PromptHandler represents commands that carry user-entered text.
+type PromptHandler interface {
 	Prompt() string
 	SetPrompt(text string)
 }
 
-// PromptHandler is a helper you can embed to implement Promptable.
-type PromptHandler struct {
-	prompt string
-}
-
-func (h *PromptHandler) Prompt() string {
+func (h *Promptable) Prompt() string {
 	return h.prompt
 }
 
-func (h *PromptHandler) SetPrompt(text string) {
+func (h *Promptable) SetPrompt(text string) {
 	h.prompt = text
 }

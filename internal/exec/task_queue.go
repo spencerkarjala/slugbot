@@ -7,6 +7,7 @@ import (
 type Task interface {
 	Apply() error
 	HandleError(error)
+	Prompt() string
 }
 
 type TaskQueue struct {
