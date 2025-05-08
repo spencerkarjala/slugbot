@@ -16,7 +16,7 @@ type InversePolarDistortCommand struct {
 }
 
 func (c *InversePolarDistortCommand) Usage() string {
-	return "Usage: `.im ipolar <A>`"
+	return "Usage: `.sim ipolar <A>`"
 }
 
 func (c *InversePolarDistortCommand) Validate() error {

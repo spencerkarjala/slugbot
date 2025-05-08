@@ -16,7 +16,7 @@ type BarrelDistortCommand struct {
 }
 
 func (c *BarrelDistortCommand) Usage() string {
-	return "Usage: `.im barrel <A> <B> <C> <D>`"
+	return "Usage: `.sim barrel <A> <B> <C> <D>`"
 }
 
 func (c *BarrelDistortCommand) Validate() error {

@@ -16,7 +16,7 @@ type PolarDistortCommand struct {
 }
 
 func (c *PolarDistortCommand) Usage() string {
-	return "Usage: `.im polar <A>`"
+	return "Usage: `.sim polar <A>`"
 }
 
 func (c *PolarDistortCommand) Validate() error {

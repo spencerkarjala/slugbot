@@ -16,7 +16,7 @@ type ArcDistortCommand struct {
 }
 
 func (c *ArcDistortCommand) Usage() string {
-	return "Usage: `.im arc <A> <B> <C> <D>`"
+	return "Usage: `.sim arc <A> <B> <C> <D>`"
 }
 
 func (c *ArcDistortCommand) Validate() error {

@@ -58,11 +58,15 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 	if message.Author.Bot {
 		return
 	}
-	if !strings.HasPrefix(message.Content, ".im") && !strings.HasPrefix(message.Content, ".saudio") {
+	if !strings.HasPrefix(message.Content, ".sim") && !strings.HasPrefix(message.Content, ".saudio") {
 		return
 	}
 
 	parts := strings.Fields(message.Content)
+
+	if parts[0] == ".imagine" {
+		return
+	}
 
 	if parts[0] == ".saudio" {
 		commandConstructor, ok := commandHandlers[".saudio"]
@@ -112,7 +116,7 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 	}
 
 	if len(parts) < 2 {
-		session.ChannelMessageSend(message.ChannelID, "Usage: .im <word>")
+		session.ChannelMessageSend(message.ChannelID, "Usage: .sim <word>")
 		return
 	}
 

@@ -16,7 +16,7 @@ type InverseBarrelDistortCommand struct {
 }
 
 func (c *InverseBarrelDistortCommand) Usage() string {
-	return "Usage: `.im ibarrel <A> <B> <C> <D>`"
+	return "Usage: `.sim ibarrel <A> <B> <C> <D>`"
 }
 
 func (c *InverseBarrelDistortCommand) Validate() error {
