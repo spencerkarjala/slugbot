@@ -83,6 +83,7 @@ def main() -> None:
     parser.add_argument("--cfg_scale", type=float, default=7.0, help="CFG scale")
     parser.add_argument("--sampler", default="dpmpp-3m-sde", help="Sampler type")
     parser.add_argument("--progress_file", default="", help="File to write progress output to")
+    parser.add_argument("--init_audio", default=None, help="Path to a WAV file to condition on (audio2audio)")
     args = parser.parse_args()
 
     # If a progress file was indicated, create it to track progress, then delete it on cleanup
@@ -102,6 +103,12 @@ def main() -> None:
     # Select device
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Using device: {device}", flush=True)
+
+    init_audio_tensor = None
+    if args.init_audio:
+        init_audio, _sr = torchaudio.load(args.init_audio)
+        # if sample rates mismatch, optionally resample here
+        init_audio_tensor = init_audio.to(device)
 
     project_dir = get_project_dir()
 
@@ -148,6 +155,11 @@ def main() -> None:
             "seconds_total": args.length,
         }]
 
+    # Prepare audio2audio conditioning
+    audio2audio_conditioning = None
+    if init_audio_tensor is not None:
+        audio2audio_conditioning = init_audio_tensor
+
     # Warm up GPU allocator
     if device.type == "cuda": torch.cuda.empty_cache()
 
@@ -160,6 +172,7 @@ def main() -> None:
             cfg_scale=args.cfg_scale,
             conditioning=conditioning,
             negative_conditioning=negative_conditioning,
+            init_audio=audio2audio_conditioning,
             sample_size=sample_size,
             sample_rate=sample_rate,
             sampler_type=args.sampler,
