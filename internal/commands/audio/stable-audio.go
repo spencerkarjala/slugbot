@@ -69,6 +69,7 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 
 	// parse params; TODO: make this more general/abstracted
 	i := 0
+	prompt := []string{}
 	for i < len(args) {
 		switch args[i] {
 		case "--length":
@@ -81,7 +82,6 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 			}
 			params.Length = length
 			i += 2
-			slog.Error("length", args[i])
 		case "--strength":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("missing value for --strength")
@@ -92,14 +92,17 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 			}
 			params.Strength = strength
 			i += 2
-			slog.Error("strength", args[i])
 		default:
-			slog.Error("default", args[i])
-			params.Prompt = strings.Join(args[i:], " ")
-
-			return params, nil
+			prompt = append(prompt, args[i])
+			i++
 		}
 	}
+
+	params.Prompt = strings.Join(prompt, " ")
+
+	slog.Info("Got prompt   ", params.Prompt)
+	slog.Info("    strength %0.2f", params.Strength)
+	slog.Info("    length   %0.2f", params.Length)
 
 	if params.Prompt == "" {
 		return nil, fmt.Errorf("prompt is empty")
