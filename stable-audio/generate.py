@@ -8,7 +8,9 @@ Usage (after creating a Conda env at ./.conda-env):
 """
 import atexit
 import os
+import shutil
 import sys
+import tempfile
 from typing import TextIO
 
 # Reduce fragmentation in PyTorch allocator
@@ -60,6 +62,14 @@ def get_project_dir(start_dir: Path = Path.cwd()) -> Path:
             return p
     raise FileNotFoundError(f"No project dir found as a parent of '{start_dir}'")
 
+def trim_audio_inplace(filepath, seconds):
+    audio, sample_rate = torchaudio.load(filepath)
+    num_samples = int(seconds * sample_rate)
+    trimmed_audio = audio[:, :num_samples]
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmpfile:
+        torchaudio.save(tmpfile.name, trimmed_audio, sample_rate)
+        shutil.move(tmpfile.name, filepath)
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -159,6 +169,8 @@ def main() -> None:
     # Save output
     torchaudio.save(args.output, audio, sample_rate)
     print(f"Saved audio to {args.output}", flush=True)
+
+    trim_audio_inplace(args.output, args.length)
 
 
 if __name__ == "__main__":
