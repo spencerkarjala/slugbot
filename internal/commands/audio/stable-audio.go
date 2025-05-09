@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,8 @@ type StableAudioParams struct {
 	Prompt         string
 	NegativePrompt string
 }
+
+var re = regexp.MustCompile(`\s+`)
 
 // SetContext captures Discord context and extracts the prompt text.
 func (c *StableAudioCommand) SetContext(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -117,14 +120,38 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 
 	slog.Info("Got prompt:          ", params.Prompt)
 	slog.Info("Got negative prompt: ", params.NegativePrompt)
-	slog.Info("    strength:        %0.2f", params.Strength)
-	slog.Info("    length:          %0.2f", params.Length)
+	slog.Info("    strength:        ", params.Strength)
+	slog.Info("    length:          ", params.Length)
 
 	if params.Prompt == "" {
 		return nil, fmt.Errorf("prompt is empty")
 	}
 
 	return params, nil
+}
+
+func truncate(s string, max int) string {
+	r := []rune(s)
+	if len(r) > max {
+		return string(r[:max])
+	}
+	return s
+}
+
+func makeFilename(params *StableAudioParams, timestamp int64) string {
+	combinedStr := ""
+	if params.Prompt != "" {
+		combinedStr += truncate(params.Prompt, 100)
+	}
+	if params.Prompt != "" && params.NegativePrompt != "" {
+		combinedStr += "-"
+	}
+	if params.NegativePrompt != "" {
+		combinedStr += truncate(params.NegativePrompt, 100)
+	}
+	baseString := re.ReplaceAllString(combinedStr, "-")
+
+	return fmt.Sprintf("saudio-%s-%d.wav", baseString, timestamp)
 }
 
 func (cmd *StableAudioCommand) Apply() error {
@@ -158,9 +185,8 @@ func (cmd *StableAudioCommand) Apply() error {
 		return fmt.Errorf("failed to send initial message: %w", err)
 	}
 
-	// Prepare output filename
 	timestamp := time.Now().Unix()
-	outFile := fmt.Sprintf("saudio_%d.wav", timestamp)
+	outFile := makeFilename(params, timestamp)
 	progressFile := fmt.Sprintf("saudio_%d.progress", timestamp)
 
 	// Start background goroutine to poll progress and edit message
