@@ -55,7 +55,7 @@ func getCommandList() string {
 }
 
 func messageCreateHandler(session *discordgo.Session, message *discordgo.MessageCreate) {
-	if message.Author.Bot {
+	if message == nil || message.Author == nil || message.Author.Bot {
 		return
 	}
 	if !strings.HasPrefix(message.Content, ".sim") && !strings.HasPrefix(message.Content, ".saudio") {
