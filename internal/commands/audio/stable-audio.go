@@ -3,6 +3,8 @@ package audio
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
@@ -214,6 +216,41 @@ func (cmd *StableAudioCommand) Apply() error {
 		}
 	}()
 
+	// 1. Check for an uploaded WAV attachment
+	var initAudioPath string
+	for _, att := range cmd.Message.Attachments {
+		if strings.HasSuffix(att.Filename, ".wav") {
+			slog.Trace("Trying to download audio from: ", att.URL)
+
+			resp, err := http.Get(att.URL)
+			if err != nil {
+				slog.Error("failed to download init audio:", err)
+				return fmt.Errorf("failed to download audio input")
+			}
+			defer resp.Body.Close()
+
+			slog.Trace("Got response: ", resp)
+
+			tmpf, err := os.CreateTemp("", "saudio-init-*.wav")
+			if err != nil {
+				slog.Error("failed to create temp file:", err)
+				return fmt.Errorf("failed to download audio input")
+			}
+			defer tmpf.Close()
+
+			slog.Trace("Created temporary file for input: ", tmpf.Name())
+
+			if _, err := io.Copy(tmpf, resp.Body); err != nil {
+				slog.Error("failed to save init audio:", err)
+				return fmt.Errorf("failed to download audio input")
+			}
+			initAudioPath = tmpf.Name()
+
+			slog.Trace("Downloaded data into file: ", initAudioPath)
+			break
+		}
+	}
+
 	cmdArgs := []string{
 		"--prompt", params.Prompt,
 		"--negative_prompt", params.NegativePrompt,
@@ -221,6 +258,12 @@ func (cmd *StableAudioCommand) Apply() error {
 		"--progress_file", progressFile,
 		"--cfg_scale", fmt.Sprintf("%0.2f", params.Strength),
 		"--length", fmt.Sprintf("%0.2f", params.Length),
+	}
+	if initAudioPath != "" {
+		slog.Info("Using input audio file: ", initAudioPath)
+		cmdArgs = append(cmdArgs, "--init_audio", initAudioPath)
+	} else {
+		slog.Info("No input audio detected; proceeding with text only")
 	}
 	command := exec.Command("./stable-audio/sag", cmdArgs...)
 
