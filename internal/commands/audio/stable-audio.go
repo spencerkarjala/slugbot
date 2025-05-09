@@ -214,13 +214,15 @@ func (cmd *StableAudioCommand) Apply() error {
 		}
 	}()
 
-	// Invoke the Stable Audio CLI via Conda inside a login shell
-	// so that conda initialization is applied and the CLI command is found.
-	shellCmd := fmt.Sprintf(
-		"./stable-audio/sag --prompt %q --negative_prompt %q --output %s --progress_file %s --cfg_scale %0.2f --length %0.2f",
-		params.Prompt, params.NegativePrompt, outFile, progressFile, params.Strength, params.Length,
-	)
-	command := exec.Command("bash", "-lc", shellCmd)
+	cmdArgs := []string{
+		"--prompt", params.Prompt,
+		"--negative_prompt", params.NegativePrompt,
+		"--output", outFile,
+		"--progress_file", progressFile,
+		"--cfg_scale", fmt.Sprintf("%0.2f", params.Strength),
+		"--length", fmt.Sprintf("%0.2f", params.Length),
+	}
+	command := exec.Command("./stable-audio/sag", cmdArgs...)
 
 	// Run the command and capture any errors or output
 	if output, err := command.CombinedOutput(); err != nil {
