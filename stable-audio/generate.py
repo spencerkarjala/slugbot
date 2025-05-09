@@ -26,6 +26,7 @@ from stable_audio_tools.models.factory import create_model_from_config
 from stable_audio_tools.models.utils import load_ckpt_state_dict
 from stable_audio_tools.training.utils import copy_state_dict
 from stable_audio_tools.inference.generation import generate_diffusion_cond
+from stable_audio_tools.inference.utils import prepare_audio
 
 MODEL_CONFIG_PATH = "models/stable-audio-open-1.0/model_config.json"
 MODEL_CHECKPOINT_PATH = "models/stable-audio-open-1.0/model.ckpt"
@@ -86,6 +87,12 @@ def main() -> None:
     parser.add_argument("--init_audio", default=None, help="Path to a WAV file to condition on (audio2audio)")
     args = parser.parse_args()
 
+    # # Scale cfg_scale to its expected values; much higher for audio2audio prompts
+    # if not args.init_audio:
+    #     args.cfg_scale = args.cfg_scale * 7.0
+    # else:
+    #     args.cfg_scale = args.cfg_scale * 150.0
+
     # If a progress file was indicated, create it to track progress, then delete it on cleanup
     if args.progress_file:
         try:
@@ -103,12 +110,6 @@ def main() -> None:
     # Select device
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Using device: {device}", flush=True)
-
-    init_audio_tensor = None
-    if args.init_audio:
-        init_audio, _sr = torchaudio.load(args.init_audio)
-        # if sample rates mismatch, optionally resample here
-        init_audio_tensor = init_audio.to(device)
 
     project_dir = get_project_dir()
 
@@ -136,8 +137,16 @@ def main() -> None:
     for p in model.parameters():
         p.requires_grad = False
 
-    sample_rate = model_config.get("sample_rate")
-    sample_size = model_config.get("sample_size")
+    sample_rate = int(model_config.get("sample_rate"))
+    sample_size = int(model_config.get("sample_size"))
+
+    audio2audio_conditioning = None
+    if args.init_audio:
+        in_waveform, in_sample_rate = torchaudio.load(args.init_audio)
+        in_waveform = in_waveform.to(device)
+        if device.type == "cuda":
+            in_waveform = in_waveform.half()
+        audio2audio_conditioning = (in_sample_rate, in_waveform)
 
     # Prepare conditioning
     conditioning = [{
@@ -154,11 +163,6 @@ def main() -> None:
             "seconds_start": 0,
             "seconds_total": args.length,
         }]
-
-    # Prepare audio2audio conditioning
-    audio2audio_conditioning = None
-    if init_audio_tensor is not None:
-        audio2audio_conditioning = init_audio_tensor
 
     # Warm up GPU allocator
     if device.type == "cuda": torch.cuda.empty_cache()

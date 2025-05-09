@@ -156,6 +156,34 @@ func makeFilename(params *StableAudioParams, timestamp int64) string {
 	return fmt.Sprintf("saudio-%s-%d.wav", baseString, timestamp)
 }
 
+func downloadAndSave(url string) (string, error) {
+	slog.Trace("Trying to download audio from: ", url)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		slog.Error("failed to download init audio:", err)
+		return "", fmt.Errorf("failed to download audio input")
+	}
+	defer resp.Body.Close()
+
+	slog.Trace("Got response: ", resp)
+
+	tmpf, err := os.CreateTemp("", "saudio-init-*.wav")
+	if err != nil {
+		slog.Error("failed to create temp file:", err)
+		return "", fmt.Errorf("failed to download audio input")
+	}
+	defer tmpf.Close()
+
+	slog.Trace("Created temporary file for input: ", tmpf.Name())
+
+	if _, err := io.Copy(tmpf, resp.Body); err != nil {
+		slog.Error("failed to save init audio:", err)
+		return "", fmt.Errorf("failed to download audio input")
+	}
+	return tmpf.Name(), nil
+}
+
 func (cmd *StableAudioCommand) Apply() error {
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
@@ -216,38 +244,41 @@ func (cmd *StableAudioCommand) Apply() error {
 		}
 	}()
 
-	// 1. Check for an uploaded WAV attachment
+	// if an uploaded wav is attached, use it as the input audio
 	var initAudioPath string
 	for _, att := range cmd.Message.Attachments {
 		if strings.HasSuffix(att.Filename, ".wav") {
-			slog.Trace("Trying to download audio from: ", att.URL)
-
-			resp, err := http.Get(att.URL)
+			initAudioPath, err = downloadAndSave(att.URL)
 			if err != nil {
-				slog.Error("failed to download init audio:", err)
+				slog.Error("failed to download init audio: %v", err)
 				return fmt.Errorf("failed to download audio input")
 			}
-			defer resp.Body.Close()
-
-			slog.Trace("Got response: ", resp)
-
-			tmpf, err := os.CreateTemp("", "saudio-init-*.wav")
-			if err != nil {
-				slog.Error("failed to create temp file:", err)
-				return fmt.Errorf("failed to download audio input")
-			}
-			defer tmpf.Close()
-
-			slog.Trace("Created temporary file for input: ", tmpf.Name())
-
-			if _, err := io.Copy(tmpf, resp.Body); err != nil {
-				slog.Error("failed to save init audio:", err)
-				return fmt.Errorf("failed to download audio input")
-			}
-			initAudioPath = tmpf.Name()
 
 			slog.Trace("Downloaded data into file: ", initAudioPath)
 			break
+		}
+	}
+
+	// if no input audio so far, and the message replies to a message with attached
+	// audio, then use that as the input audio
+	if initAudioPath == "" && cmd.Message.MessageReference != nil {
+		refMsg, err := cmd.Session.ChannelMessage(
+			cmd.Message.ChannelID,
+			cmd.Message.MessageReference.MessageID,
+		)
+		if err != nil {
+			slog.Warn("could not fetch referenced message: ", err)
+		} else {
+			for _, att := range refMsg.Attachments {
+				if strings.HasSuffix(att.Filename, ".wav") {
+					initAudioPath, err = downloadAndSave(att.URL)
+					if err != nil {
+						slog.Error("failed to download init audio: %v", err)
+						return fmt.Errorf("failed to download audio input from reply")
+					}
+					break
+				}
+			}
 		}
 	}
 
@@ -268,8 +299,11 @@ func (cmd *StableAudioCommand) Apply() error {
 	command := exec.Command("./stable-audio/sag", cmdArgs...)
 
 	// Run the command and capture any errors or output
-	if output, err := command.CombinedOutput(); err != nil {
+	output, err := command.CombinedOutput()
+	if err != nil {
 		errMsg := fmt.Sprintf("Error during audio generation: %v\n%s", err, string(output))
+		slog.Error("Captured input from generate.py:")
+		slog.Error(string(output))
 		cmd.Session.ChannelMessageEdit(cmd.Message.ChannelID, initMsg.ID, errMsg)
 		return err
 	}
