@@ -146,15 +146,23 @@ def main() -> None:
     for p in model.parameters():
         p.requires_grad = False
 
-    sample_rate = int(model_config.get("sample_rate"))
+    target_sample_rate = int(model_config.get("sample_rate"))
     sample_size = int(model_config.get("sample_size"))
 
     audio2audio_conditioning = None
     if args.init_audio:
         in_waveform, in_sample_rate = torchaudio.load(args.init_audio)
+        if in_sample_rate != target_sample_rate:
+            print(f"Resampling input audio from sample rate {in_sample_rate} to {target_sample_rate}...")
+            resampler = torchaudio.transforms.Resample(orig_freq=in_sample_rate, new_freq=target_sample_rate)
+            in_waveform = resampler(in_waveform)
+            in_sample_rate = target_sample_rate
+            print("...done resampling")
         in_waveform = in_waveform.to(device)
         if device.type == "cuda":
+            print("Converting input audio to 16-bit...")
             in_waveform = in_waveform.half()
+            print("...done converting")
         audio2audio_conditioning = (in_sample_rate, in_waveform)
 
     # Prepare conditioning
@@ -187,7 +195,7 @@ def main() -> None:
             negative_conditioning=negative_conditioning,
             init_audio=audio2audio_conditioning,
             sample_size=sample_size,
-            sample_rate=sample_rate,
+            sample_rate=target_sample_rate,
             sampler_type=args.sampler,
             device=device,
             sigma_min=0.3,
@@ -205,7 +213,7 @@ def main() -> None:
     audio = audio.mul(32767).to(torch.int16).cpu()
 
     # Save output
-    torchaudio.save(args.output, audio, sample_rate)
+    torchaudio.save(args.output, audio, target_sample_rate)
     print(f"Saved audio to {args.output}", flush=True)
 
     trim_audio_inplace(args.output, args.length)
