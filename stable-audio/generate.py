@@ -68,9 +68,9 @@ def trim_audio_inplace(filepath, seconds):
     num_samples = int(seconds * sample_rate)
     trimmed_audio = audio[:, :num_samples]
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmpfile:
-        torchaudio.save(tmpfile.name, trimmed_audio, sample_rate)
-        shutil.move(tmpfile.name, filepath)
+    tmp_out = filepath + ".trimmed.tmp.wav"
+    torchaudio.save(tmp_out, trimmed_audio, sample_rate)
+    os.replace(tmp_out, filepath)
 
 def main() -> None:
     parser = argparse.ArgumentParser(

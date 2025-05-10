@@ -180,8 +180,6 @@ func downloadAndSave(url string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	// slog.Trace("Got response: ", resp)
-
 	tmpf, err := os.CreateTemp("", "saudio-init-*.wav")
 	if err != nil {
 		slog.Error("failed to create temp file:", err)
