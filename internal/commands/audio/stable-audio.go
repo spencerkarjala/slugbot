@@ -29,6 +29,7 @@ type StableAudioParams struct {
 	Strength       float64
 	Prompt         string
 	NegativePrompt string
+	Seed           int64
 }
 
 var re = regexp.MustCompile(`\s+`)
@@ -72,6 +73,7 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 		Strength:       7.0,
 		Prompt:         "",
 		NegativePrompt: "",
+		Seed:           -1,
 	}
 
 	// parse params; TODO: make this more general/abstracted
@@ -103,6 +105,17 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 			params.Strength = strength
 			i += 2
 
+		case "--seed":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("missing value for --seed")
+			}
+			seed, err := strconv.ParseInt(args[i+1], 10, 64)
+			if err != nil || seed < 0 {
+				return nil, fmt.Errorf("invalid seed '%q' (needs to be a positive integer): %w", params.Seed, err)
+			}
+			params.Seed = seed
+			i += 2
+
 		case "--negative":
 			collectNegative = true
 			i++
@@ -124,6 +137,7 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 	slog.Info("Got negative prompt: ", params.NegativePrompt)
 	slog.Info("    strength:        ", params.Strength)
 	slog.Info("    length:          ", params.Length)
+	slog.Info("    seed:            ", params.Seed)
 
 	if params.Prompt == "" {
 		return nil, fmt.Errorf("prompt is empty")
@@ -166,7 +180,7 @@ func downloadAndSave(url string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	slog.Trace("Got response: ", resp)
+	// slog.Trace("Got response: ", resp)
 
 	tmpf, err := os.CreateTemp("", "saudio-init-*.wav")
 	if err != nil {
@@ -289,6 +303,7 @@ func (cmd *StableAudioCommand) Apply() error {
 		"--progress_file", progressFile,
 		"--cfg_scale", fmt.Sprintf("%0.2f", params.Strength),
 		"--length", fmt.Sprintf("%0.2f", params.Length),
+		"--seed", fmt.Sprintf("%d", params.Seed),
 	}
 	if initAudioPath != "" {
 		slog.Info("Using input audio file: ", initAudioPath)
@@ -298,12 +313,12 @@ func (cmd *StableAudioCommand) Apply() error {
 	}
 	command := exec.Command("./stable-audio/sag", cmdArgs...)
 
-	// Run the command and capture any errors or output
-	output, err := command.CombinedOutput()
-	if err != nil {
-		errMsg := fmt.Sprintf("Error during audio generation: %v\n%s", err, string(output))
-		slog.Error("Captured input from generate.py:")
-		slog.Error(string(output))
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+
+	// Run the command
+	if err := command.Run(); err != nil {
+		errMsg := fmt.Sprintf("Error during audio generation: %v", err)
 		cmd.Session.ChannelMessageEdit(cmd.Message.ChannelID, initMsg.ID, errMsg)
 		return err
 	}

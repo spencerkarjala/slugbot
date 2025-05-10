@@ -85,6 +85,7 @@ def main() -> None:
     parser.add_argument("--sampler", default="dpmpp-3m-sde", help="Sampler type")
     parser.add_argument("--progress_file", default="", help="File to write progress output to")
     parser.add_argument("--init_audio", default=None, help="Path to a WAV file to condition on (audio2audio)")
+    parser.add_argument("--seed", default="", help="Integer seed used for randomness in audio generation")
     args = parser.parse_args()
 
     # # Scale cfg_scale to its expected values; much higher for audio2audio prompts
@@ -110,6 +111,14 @@ def main() -> None:
     # Select device
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Using device: {device}", flush=True)
+
+    # Parse the seed if it's present
+    seed_value = -1
+    if args.seed and args.seed != "-1":
+        seed_value = int(args.seed)
+        if seed_value < 0:
+            raise ValueError("Seed needs to be a positive integer")
+        print("Using seed: ", seed_value)
 
     project_dir = get_project_dir()
 
@@ -183,6 +192,7 @@ def main() -> None:
             device=device,
             sigma_min=0.3,
             sigma_max=500,
+            seed=seed_value,
         )
 
     # Free any unused GPU memory
