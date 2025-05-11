@@ -31,6 +31,9 @@ var commandHandlers = map[string]func() commands.CommandHandler{
 var audioQueues = make(map[string]*exec.TaskQueue)
 var audioQueueViews = make(map[string]*exec.TaskQueueView)
 
+var audioQueue = *exec.NewTaskQueue()
+var audioQueueView *exec.TaskQueueView
+
 func UpdateQueueViewCallback(view *exec.TaskQueueView) {
 	if view == nil {
 		slog.Error("received nil view in UpdateQueueViewCallback")
@@ -94,21 +97,9 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 		// finally, set the prompt
 		stableAudioCommand.SetPrompt(strings.Join(parts[1:], " "))
 
-		// lazily create a new TaskQueue for the current channel
-		audioQueue, ok := audioQueues[message.ChannelID]
-		if !ok {
-			audioQueue = exec.NewTaskQueue()
-			audioQueues[message.ChannelID] = audioQueue
-		}
-
-		// lazily create a new TaskQueueView for the current channel
-		_, ok = audioQueueViews[message.ChannelID]
-		if !ok {
-			audioQueueView := exec.NewTaskQueueView(audioQueue, session, message.ChannelID)
-			audioQueueViews[message.ChannelID] = audioQueueView
-
-			// if we create a TaskQueueView, we need to also create a goroutine to refresh it
-			go UpdateQueueViewCallback(audioQueueView)
+		if audioQueueView == nil {
+			audioQueueView := *exec.NewTaskQueueView(&audioQueue, session, message.ChannelID)
+			go UpdateQueueViewCallback(&audioQueueView)
 		}
 
 		audioQueue.Enqueue(stableAudioCommand)
