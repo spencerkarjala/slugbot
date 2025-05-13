@@ -32,7 +32,8 @@ type StableAudioParams struct {
 	Seed           int64
 }
 
-var re = regexp.MustCompile(`\s+`)
+var whitespaceRegex = regexp.MustCompile(`\s+`)
+var forwardSlashRegex = regexp.MustCompile(`/`)
 
 // SetContext captures Discord context and extracts the prompt text.
 func (c *StableAudioCommand) SetContext(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -165,7 +166,8 @@ func makeFilename(params *StableAudioParams, timestamp int64) string {
 	if params.NegativePrompt != "" {
 		combinedStr += truncate(params.NegativePrompt, 100)
 	}
-	baseString := re.ReplaceAllString(combinedStr, "-")
+	baseString := whitespaceRegex.ReplaceAllString(combinedStr, "-")
+	baseString = forwardSlashRegex.ReplaceAllString(baseString, "")
 
 	return fmt.Sprintf("saudio-%s-%d.wav", baseString, timestamp)
 }
