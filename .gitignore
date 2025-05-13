@@ -1,4 +1,4 @@
-.conda-env
+.conda-*
 *.progress
 *.wav
 *.zip
