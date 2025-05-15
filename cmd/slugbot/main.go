@@ -71,7 +71,7 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 		return
 	}
 
-	if parts[0] == ".saudio" {
+	if parts[0] == ".saudio" || parts[0] == ".saudiosm" {
 		commandConstructor, ok := commandHandlers[".saudio"]
 		if !ok {
 			session.ChannelMessageSend(message.ChannelID, "Error occured while processing .saudio prompt")
@@ -95,6 +95,7 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 		}
 
 		// finally, set the prompt
+		parts = append(parts, "--small")
 		stableAudioCommand.SetPrompt(strings.Join(parts[1:], " "))
 
 		if audioQueueView == nil {

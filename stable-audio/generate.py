@@ -28,8 +28,8 @@ from stable_audio_tools.models.utils import copy_state_dict
 from stable_audio_tools.inference.generation import generate_diffusion_cond
 from stable_audio_tools.inference.utils import prepare_audio
 
-MODEL_CONFIG_PATH = "models/stable-audio-open-1.0/model_config.json"
-MODEL_CHECKPOINT_PATH = "models/stable-audio-open-1.0/model.ckpt"
+STABLE_AUDIO_OPEN_1_0_PATH = "models/stable-audio-open-1.0"
+STABLE_AUDIO_OPEN_SMALL_PATH = "models/stable-audio-open-small"
 
 class ProgressWriter:
     """
@@ -86,6 +86,7 @@ def main() -> None:
     parser.add_argument("--progress_file", default="", help="File to write progress output to")
     parser.add_argument("--init_audio", default=None, help="Path to a WAV file to condition on (audio2audio)")
     parser.add_argument("--seed", default="", help="Integer seed used for randomness in audio generation")
+    parser.add_argument("--small", action="store_true", help="If set, uses the small version of Stable Audio Open")
     args = parser.parse_args()
 
     # # Scale cfg_scale to its expected values; much higher for audio2audio prompts
@@ -93,6 +94,20 @@ def main() -> None:
     #     args.cfg_scale = args.cfg_scale * 7.0
     # else:
     #     args.cfg_scale = args.cfg_scale * 150.0
+
+    project_dir = get_project_dir()
+
+    # Switch between models
+    if args.small:
+        config_path = (project_dir / STABLE_AUDIO_OPEN_SMALL_PATH) / "model_config.json"
+        ckpt_path = (project_dir / STABLE_AUDIO_OPEN_SMALL_PATH) / "model.ckpt"
+        # manually override sampler, since SAO Small only supports pingpong sampler
+        args.sampler = "pingpong"
+        # args.length = 12
+        args.steps = 8
+    else:
+        config_path = (project_dir / STABLE_AUDIO_OPEN_1_0_PATH) / "model_config.json"
+        ckpt_path = (project_dir / STABLE_AUDIO_OPEN_1_0_PATH) / "model.ckpt"
 
     # If a progress file was indicated, create it to track progress, then delete it on cleanup
     if args.progress_file:
@@ -120,10 +135,7 @@ def main() -> None:
             raise ValueError("Seed needs to be a positive integer")
         print("Using seed: ", seed_value)
 
-    project_dir = get_project_dir()
-
     # Load model configuration
-    config_path = project_dir / MODEL_CONFIG_PATH
     print(f"Loading model config from {config_path}", flush=True)
     with open(config_path) as f:
         model_config = json.load(f)
@@ -137,7 +149,6 @@ def main() -> None:
     model = create_model_from_config(model_config)
 
     # Load weights from local checkpoint
-    ckpt_path = project_dir / MODEL_CHECKPOINT_PATH
     print(f"Loading checkpoint from {ckpt_path}", flush=True)
     state_dict = load_ckpt_state_dict(str(ckpt_path))
     copy_state_dict(model, state_dict)

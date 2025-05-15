@@ -30,6 +30,7 @@ type StableAudioParams struct {
 	Prompt         string
 	NegativePrompt string
 	Seed           int64
+	IsSmall        bool
 }
 
 var whitespaceRegex = regexp.MustCompile(`\s+`)
@@ -75,6 +76,7 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 		Prompt:         "",
 		NegativePrompt: "",
 		Seed:           -1,
+		IsSmall:        false,
 	}
 
 	// parse params; TODO: make this more general/abstracted
@@ -121,6 +123,11 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 			collectNegative = true
 			i++
 
+		case "--small":
+			slog.Error("here.................................")
+			params.IsSmall = true
+			i++
+
 		default:
 			if !collectNegative {
 				prompt = append(prompt, args[i])
@@ -139,6 +146,7 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 	slog.Info("    strength:        ", params.Strength)
 	slog.Info("    length:          ", params.Length)
 	slog.Info("    seed:            ", params.Seed)
+	slog.Info("    small?           ", params.IsSmall)
 
 	if params.Prompt == "" {
 		return nil, fmt.Errorf("prompt is empty")
@@ -210,6 +218,9 @@ func (cmd *StableAudioCommand) Apply() error {
 
 	content := strings.TrimSpace(cmd.Message.Content)
 	parts := strings.Split(content, " ")
+	if string(parts[0]) == ".saudiosm" {
+		parts = append(parts, "--small")
+	}
 	if len(parts) < 2 {
 		cmd.Session.ChannelMessageSendReply(cmd.Message.ChannelID, "Usage: .saudio <prompt>", triggeringMessage)
 		return nil
@@ -310,6 +321,10 @@ func (cmd *StableAudioCommand) Apply() error {
 		cmdArgs = append(cmdArgs, "--init_audio", initAudioPath)
 	} else {
 		slog.Info("No input audio detected; proceeding with text only")
+	}
+	if params.IsSmall {
+		slog.Info("Using small model")
+		cmdArgs = append(cmdArgs, "--small")
 	}
 	command := exec.Command("./stable-audio/sag", cmdArgs...)
 
