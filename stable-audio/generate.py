@@ -24,7 +24,7 @@ import torchaudio
 from einops import rearrange
 from stable_audio_tools.models.factory import create_model_from_config
 from stable_audio_tools.models.utils import load_ckpt_state_dict
-from stable_audio_tools.training.utils import copy_state_dict
+from stable_audio_tools.models.utils import copy_state_dict
 from stable_audio_tools.inference.generation import generate_diffusion_cond
 from stable_audio_tools.inference.utils import prepare_audio
 
