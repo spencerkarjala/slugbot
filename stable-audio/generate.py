@@ -128,8 +128,12 @@ def main() -> None:
     with open(config_path) as f:
         model_config = json.load(f)
 
+    if args.length != parser.get_default("length"):
+        model_config["sample_size"] = model_config["sample_rate"] * args.length
+
     # Instantiate model
     print("Creating model from config...", flush=True)
+    print(f"Model config's sample_size is {model_config['sample_size']}")
     model = create_model_from_config(model_config)
 
     # Load weights from local checkpoint
