@@ -14,6 +14,7 @@ import (
 
 	"slugbot/internal/commands"
 	"slugbot/internal/commands/traits"
+	"slugbot/internal/discord"
 	"slugbot/internal/io/slog"
 
 	"github.com/bwmarrin/discordgo"
@@ -250,43 +251,60 @@ func (cmd *StableAudioCommand) Apply() error {
 		return err
 	}
 
-	initMsg, err := cmd.Session.ChannelMessageSendReply(
-		cmd.Message.ChannelID,
-		fmt.Sprintf("Generating audio for prompt: `%s`...\r\nnegative prompt: `%s`", params.Prompt, params.NegativePrompt),
-		triggeringMessage,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to send initial message: %w", err)
-	}
+	// initMsg, err := cmd.Session.ChannelMessageSendReply(
+	// 	cmd.Message.ChannelID,
+	// 	fmt.Sprintf("Generating audio for prompt: `%s`...\r\nnegative prompt: `%s`", params.Prompt, params.NegativePrompt),
+	// 	triggeringMessage,
+	// )
+	// if err != nil {
+	// 	return fmt.Errorf("failed to send initial message: %w", err)
+	// }
 
 	timestamp := time.Now().Unix()
 	outFile := makeFilename(params, timestamp)
-	progressFile := fmt.Sprintf("saudio_%d.progress", timestamp)
+	// progressFile := fmt.Sprintf("saudio_%d.progress", timestamp)
 
-	// Start background goroutine to poll progress and edit message
-	done := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				cmd.Session.ChannelMessageDelete(initMsg.ChannelID, initMsg.ID)
-				return
-			case <-ticker.C:
-				data, err := os.ReadFile(progressFile)
-				if err != nil {
-					continue
-				}
-				text := strings.TrimSpace(string(data))
-				if text != "" {
-					cmd.Session.ChannelMessageEdit(initMsg.ChannelID, initMsg.ID,
-						fmt.Sprintf("`%s`", text),
-					)
-				}
-			}
-		}
-	}()
+	// // Start background goroutine to poll progress and edit message
+	// done := make(chan struct{})
+	// go func() {
+	// 	ticker := time.NewTicker(time.Second)
+	// 	defer ticker.Stop()
+	// 	for {
+	// 		select {
+	// 		case <-done:
+	// 			cmd.Session.ChannelMessageDelete(initMsg.ChannelID, initMsg.ID)
+	// 			return
+	// 		case <-ticker.C:
+	// 			data, err := os.ReadFile(progressFile)
+	// 			if err != nil {
+	// 				continue
+	// 			}
+	// 			text := strings.TrimSpace(string(data))
+	// 			if text != "" {
+	// 				cmd.Session.ChannelMessageEdit(initMsg.ChannelID, initMsg.ID,
+	// 					fmt.Sprintf("`%s`", text),
+	// 				)
+	// 			}
+	// 		}
+	// 	}
+	// }()
+
+	fp, err := discord.NewFilePollMessage(
+		discord.ConcreteSession{Session: cmd.Session},
+		cmd.Message.ChannelID,
+		1*time.Second,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to init progress poller: %w", err)
+	}
+
+	initMsgString := fmt.Sprintf("Generating audio for prompt: `%s`...\r\nnegative prompt: `%s`", params.Prompt, params.NegativePrompt)
+	if err := fp.Start(initMsgString); err != nil {
+		return fmt.Errorf("failed to start progress poller: %w", err)
+	}
+	defer fp.Stop()
+
+	progressFile := fp.FilePath
 
 	// if an uploaded wav is attached, use it as the input audio
 	var initAudioPath string
@@ -353,11 +371,11 @@ func (cmd *StableAudioCommand) Apply() error {
 
 	// Run the command
 	if err := command.Run(); err != nil {
-		errMsg := fmt.Sprintf("Error during audio generation: %v", err)
-		cmd.Session.ChannelMessageEdit(cmd.Message.ChannelID, initMsg.ID, errMsg)
+		// errMsg := fmt.Sprintf("Error during audio generation: %v", err)
+		// cmd.Session.ChannelMessageEdit(cmd.Message.ChannelID, initMsg.ID, errMsg)
 		return err
 	}
-	close(done)
+	// close(done)
 
 	// Send the resulting audio file back to the Discord channel
 	file, err := os.Open(outFile)

@@ -50,7 +50,7 @@ class ProgressWriter:
         
         try:
             with open(self._fname, 'w') as f:
-                f.write(data[1:].rstrip('\n'))
+                f.write("`" + data[1:].rstrip('\n') + "`")
         except Exception:
             pass
     def flush(self) -> None:
