@@ -104,7 +104,7 @@ def main() -> None:
         # manually override sampler, since SAO Small only supports pingpong sampler
         args.sampler = "pingpong"
         # args.length = 12
-        args.steps = 8
+        args.cfg_scale = args.cfg_scale * 6.0 / 7.0
     else:
         config_path = (project_dir / STABLE_AUDIO_OPEN_1_0_PATH) / "model_config.json"
         ckpt_path = (project_dir / STABLE_AUDIO_OPEN_1_0_PATH) / "model.ckpt"

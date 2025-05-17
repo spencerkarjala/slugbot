@@ -30,6 +30,7 @@ type StableAudioParams struct {
 	Prompt         string
 	NegativePrompt string
 	Seed           int64
+	Steps          int64
 	IsSmall        bool
 }
 
@@ -76,6 +77,7 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 		Prompt:         "",
 		NegativePrompt: "",
 		Seed:           -1,
+		Steps:          100,
 		IsSmall:        false,
 	}
 
@@ -84,6 +86,7 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 	prompt := []string{}
 	negativePrompt := []string{}
 	collectNegative := false
+	stepsSet := false
 	for i < len(args) {
 		switch args[i] {
 		case "--length":
@@ -119,12 +122,23 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 			params.Seed = seed
 			i += 2
 
+		case "--steps":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("missing value for --steps")
+			}
+			steps, err := strconv.ParseInt(args[i+1], 10, 64)
+			if err != nil || steps < 0 {
+				return nil, fmt.Errorf("invalid steps '%q' (needs to be >0): %w", params.Steps, err)
+			}
+			params.Steps = steps
+			i += 2
+			stepsSet = true
+
 		case "--negative":
 			collectNegative = true
 			i++
 
 		case "--small":
-			slog.Error("here.................................")
 			params.IsSmall = true
 			i++
 
@@ -138,6 +152,10 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 		}
 	}
 
+	if !stepsSet && params.IsSmall {
+		params.Steps = 8
+	}
+
 	params.Prompt = strings.Join(prompt, " ")
 	params.NegativePrompt = strings.Join(negativePrompt, " ")
 
@@ -146,6 +164,7 @@ func ParseArgs(args []string) (*StableAudioParams, error) {
 	slog.Info("    strength:        ", params.Strength)
 	slog.Info("    length:          ", params.Length)
 	slog.Info("    seed:            ", params.Seed)
+	slog.Info("    steps:           ", params.Steps)
 	slog.Info("    small?           ", params.IsSmall)
 
 	if params.Prompt == "" {
@@ -315,6 +334,7 @@ func (cmd *StableAudioCommand) Apply() error {
 		"--cfg_scale", fmt.Sprintf("%0.2f", params.Strength),
 		"--length", fmt.Sprintf("%0.2f", params.Length),
 		"--seed", fmt.Sprintf("%d", params.Seed),
+		"--steps", fmt.Sprintf("%d", params.Steps),
 	}
 	if initAudioPath != "" {
 		slog.Info("Using input audio file: ", initAudioPath)
