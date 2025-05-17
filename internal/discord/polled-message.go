@@ -16,8 +16,8 @@ type FilePollMessage struct {
 }
 
 // NewFilePollMessage constructs the object.  interval is your polling interval.
-func NewFilePollMessage(api SessionAPI, channelID string, interval time.Duration) (*FilePollMessage, error) {
-	msg, err := NewMessage(api, channelID)
+func NewFilePollMessage(api SessionAPI, channelID string, replyToMessageID string, interval time.Duration) (*FilePollMessage, error) {
+	msg, err := NewMessage(api, channelID, replyToMessageID)
 	if err != nil {
 		return nil, err
 	}

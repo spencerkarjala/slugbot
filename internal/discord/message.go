@@ -6,23 +6,28 @@ import (
 )
 
 type Message struct {
-	API       SessionAPI
-	ChannelID string
-	MessageID string
+	API                SessionAPI
+	ChannelID          string
+	MessageID          string
+	RepliedToMessageID string
 }
 
 // Create a new unsent Message
-func NewMessage(api SessionAPI, channelID string) (*Message, error) {
+func NewMessage(api SessionAPI, channelID string, repliedToMessageID string) (*Message, error) {
 	if err := api.Check(); err != nil {
 		return nil, fmt.Errorf("NewMessage: encountered error: %w", err)
 	}
 	if channelID == "" {
 		return nil, fmt.Errorf("NewMessage: received empty channelID string")
 	}
+	if repliedToMessageID == "" {
+		return nil, fmt.Errorf("NewMessage: received empty ID for message to reply to")
+	}
 	return &Message{
-		API:       api,
-		ChannelID: channelID,
-		MessageID: "",
+		API:                api,
+		ChannelID:          channelID,
+		MessageID:          "",
+		RepliedToMessageID: repliedToMessageID,
 	}, nil
 }
 
@@ -37,16 +42,11 @@ func (m *Message) Create(messageContent string) error {
 	if m.MessageID != "" {
 		return fmt.Errorf("Create failed validation: message ID is already set")
 	}
-
-	messageExists, err := m.exists()
-	if err != nil {
-		return fmt.Errorf("Create existence check: encountered error: %w", err)
-	} else if messageExists {
-		return fmt.Errorf("Create existence check: message already exists")
+	if m.RepliedToMessageID == "" {
+		return fmt.Errorf("Create failed validation: ID of message to reply to is unset")
 	}
 
-	msg, err := m.API.ChannelMessageSend(m.ChannelID, messageContent)
-	fmt.Printf("%s\n", msg.ID)
+	msg, err := m.API.ChannelMessageSendReply(m.ChannelID, messageContent, m.RepliedToMessageID)
 	if err != nil {
 		return fmt.Errorf("Create request: encountered error: %w", err)
 	}
@@ -103,23 +103,4 @@ func (m *Message) validate() error {
 	}
 
 	return nil
-}
-
-func (m *Message) exists() (bool, error) {
-	if err := m.API.Check(); err != nil {
-		return false, fmt.Errorf("Message existence check: encountered error: %w", err)
-	}
-	// short-circuit when no ID yet
-	if m.ChannelID == "" {
-		return false, nil
-	}
-
-	_, err := m.API.ChannelMessage(m.ChannelID, m.MessageID)
-	if err == ErrUnknownMessage {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("Message existence check: encountered error: %w", err)
-	}
-	return true, nil
 }
