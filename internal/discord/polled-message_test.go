@@ -28,6 +28,9 @@ func (f *mockSessionAPI) ChannelMessageSend(channelID, content string) (Concrete
 	f.SendChan, f.SendContent = channelID, content
 	return ConcreteMessage{ID: f.SendID}, f.SendErr
 }
+func (f *mockSessionAPI) ChannelMessageSendReply(channelID string, content string, replyToID string) (ConcreteMessage, error) {
+	return ConcreteMessage{ID: f.SendID}, f.SendErr
+}
 func (f *mockSessionAPI) ChannelMessageEdit(channelID, messageID, content string) error {
 	f.EditCalls = append(f.EditCalls, content)
 	return f.EditError

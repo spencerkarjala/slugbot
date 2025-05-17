@@ -28,23 +28,18 @@ func (api ConcreteSession) Check() error {
 	return nil
 }
 
-// ChannelMessage fetches a single message. It wraps Discord REST errors into ErrUnknownMessage when appropriate.
-func (api ConcreteSession) ChannelMessage(channelID, messageID string) (ConcreteMessage, error) {
-	msg, err := api.Session.ChannelMessage(channelID, messageID)
+// fetches a single message. It wraps Discord REST errors into ErrUnknownMessage when appropriate.
+func (api ConcreteSession) ChannelMessage(channelID string, messageID string) (ConcreteMessage, error) {
+	msg, err := getMessage(api.Session, channelID, messageID)
 	if err != nil {
-		if restErr, ok := err.(*discordgo.RESTError); ok {
-			if (restErr.Message != nil && restErr.Message.Code == discordgo.ErrCodeUnknownMessage) ||
-				(restErr.Response != nil && restErr.Response.StatusCode == http.StatusNotFound) {
-				return ConcreteMessage{}, ErrUnknownMessage
-			}
-		}
 		return ConcreteMessage{}, err
 	}
+
 	return ConcreteMessage{ID: msg.ID}, nil
 }
 
-// ChannelMessageSend sends a new message to the channel. Errors are passed through directly.
-func (api ConcreteSession) ChannelMessageSend(channelID, content string) (ConcreteMessage, error) {
+// sends a new message to the channel. Errors are passed through directly.
+func (api ConcreteSession) ChannelMessageSend(channelID string, content string) (ConcreteMessage, error) {
 	msg, err := api.Session.ChannelMessageSend(channelID, content)
 	if err != nil {
 		return ConcreteMessage{}, err
@@ -52,14 +47,29 @@ func (api ConcreteSession) ChannelMessageSend(channelID, content string) (Concre
 	return ConcreteMessage{ID: msg.ID}, nil
 }
 
-// ChannelMessageEdit edits an existing message’s content. Errors are passed through directly.
-func (api ConcreteSession) ChannelMessageEdit(channelID, messageID, content string) error {
+// sends a new message to the channel, replying to a specific message.
+func (api ConcreteSession) ChannelMessageSendReply(channelID string, content string, replyToMessageID string) (ConcreteMessage, error) {
+	messageToReplyTo, err := getMessage(api.Session, channelID, replyToMessageID)
+	if err != nil {
+		return ConcreteMessage{}, err
+	}
+
+	msg, err := api.Session.ChannelMessageSendReply(channelID, content, messageToReplyTo.Reference())
+	if err != nil {
+		return ConcreteMessage{}, err
+	}
+
+	return ConcreteMessage{ID: msg.ID}, nil
+}
+
+// edits an existing message’s content. Errors are passed through directly.
+func (api ConcreteSession) ChannelMessageEdit(channelID string, messageID, content string) error {
 	_, err := api.Session.ChannelMessageEdit(channelID, messageID, content)
 	return err
 }
 
-// ChannelMessageDelete deletes the specified message. It wraps Discord REST errors into ErrUnknownMessage when appropriate.
-func (api ConcreteSession) ChannelMessageDelete(channelID, messageID string) error {
+// deletes the specified message. It wraps Discord REST errors into ErrUnknownMessage when appropriate.
+func (api ConcreteSession) ChannelMessageDelete(channelID string, messageID string) error {
 	err := api.Session.ChannelMessageDelete(channelID, messageID)
 	if err != nil {
 		if restErr, ok := err.(*discordgo.RESTError); ok {
@@ -73,12 +83,28 @@ func (api ConcreteSession) ChannelMessageDelete(channelID, messageID string) err
 	return nil
 }
 
-// SessionAPI captures the methods used for Discord messaging so they can be mocked.
+// captures the methods used for Discord messaging so they can be mocked.
 // ErrUnknownMessage should be used by tests to simulate a 404/UnknownMessage case.
 type SessionAPI interface {
 	Check() error
-	ChannelMessage(channelID, messageID string) (ConcreteMessage, error)
-	ChannelMessageSend(channelID, content string) (ConcreteMessage, error)
-	ChannelMessageEdit(channelID, messageID, content string) error
-	ChannelMessageDelete(channelID, messageID string) error
+	ChannelMessage(channelID string, messageID string) (ConcreteMessage, error)
+	ChannelMessageSend(channelID string, content string) (ConcreteMessage, error)
+	ChannelMessageSendReply(channelID string, content string, replyToID string) (ConcreteMessage, error)
+	ChannelMessageEdit(channelID string, messageID, content string) error
+	ChannelMessageDelete(channelID string, messageID string) error
+}
+
+// helper to get a message using only its string id
+func getMessage(session *discordgo.Session, channelID string, messageID string) (*discordgo.Message, error) {
+	msg, err := session.ChannelMessage(channelID, messageID)
+	if err != nil {
+		if restErr, ok := err.(*discordgo.RESTError); ok {
+			if (restErr.Message != nil && restErr.Message.Code == discordgo.ErrCodeUnknownMessage) ||
+				(restErr.Response != nil && restErr.Response.StatusCode == http.StatusNotFound) {
+				return nil, ErrUnknownMessage
+			}
+		}
+		return nil, err
+	}
+	return msg, nil
 }

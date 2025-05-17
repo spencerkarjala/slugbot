@@ -23,16 +23,19 @@ type fakeAPI struct {
 func (f *fakeAPI) Check() error {
 	return f.CheckError
 }
-func (f *fakeAPI) ChannelMessage(channelID, messageID string) (ConcreteMessage, error) {
+func (f *fakeAPI) ChannelMessage(channelID string, messageID string) (ConcreteMessage, error) {
 	return f.MsgReturnedFromGet, f.GetError
 }
-func (f *fakeAPI) ChannelMessageSend(channelID, content string) (ConcreteMessage, error) {
+func (f *fakeAPI) ChannelMessageSend(channelID string, content string) (ConcreteMessage, error) {
 	return f.MsgReturnedFromCreate, f.CreateError
 }
-func (f *fakeAPI) ChannelMessageEdit(channelID, messageID, content string) error {
+func (f *fakeAPI) ChannelMessageSendReply(channelID string, content string, replyToID string) (ConcreteMessage, error) {
+	return f.MsgReturnedFromCreate, f.CreateError
+}
+func (f *fakeAPI) ChannelMessageEdit(channelID string, messageID, content string) error {
 	return f.EditError
 }
-func (f *fakeAPI) ChannelMessageDelete(channelID, messageID string) error {
+func (f *fakeAPI) ChannelMessageDelete(channelID string, messageID string) error {
 	return f.DeleteError
 }
 

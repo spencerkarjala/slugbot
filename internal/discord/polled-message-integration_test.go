@@ -32,6 +32,11 @@ func (m *fakeDiscordAPI) ChannelMessageSend(channelID, content string) (Concrete
 	m.ContentSetByPolledFileOnCreate = content
 	return m.MsgReturnedFromCreate, m.CreateError
 }
+func (m *fakeDiscordAPI) ChannelMessageSendReply(channelID string, content string, replyToID string) (ConcreteMessage, error) {
+	m.ChannelSetByPolledFileOnCreate = channelID
+	m.ContentSetByPolledFileOnCreate = content
+	return m.MsgReturnedFromCreate, m.CreateError
+}
 func (m *fakeDiscordAPI) ChannelMessageEdit(channelID, messageID, content string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
