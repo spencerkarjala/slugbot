@@ -251,43 +251,8 @@ func (cmd *StableAudioCommand) Apply() error {
 		return err
 	}
 
-	// initMsg, err := cmd.Session.ChannelMessageSendReply(
-	// 	cmd.Message.ChannelID,
-	// 	fmt.Sprintf("Generating audio for prompt: `%s`...\r\nnegative prompt: `%s`", params.Prompt, params.NegativePrompt),
-	// 	triggeringMessage,
-	// )
-	// if err != nil {
-	// 	return fmt.Errorf("failed to send initial message: %w", err)
-	// }
-
 	timestamp := time.Now().Unix()
 	outFile := makeFilename(params, timestamp)
-	// progressFile := fmt.Sprintf("saudio_%d.progress", timestamp)
-
-	// // Start background goroutine to poll progress and edit message
-	// done := make(chan struct{})
-	// go func() {
-	// 	ticker := time.NewTicker(time.Second)
-	// 	defer ticker.Stop()
-	// 	for {
-	// 		select {
-	// 		case <-done:
-	// 			cmd.Session.ChannelMessageDelete(initMsg.ChannelID, initMsg.ID)
-	// 			return
-	// 		case <-ticker.C:
-	// 			data, err := os.ReadFile(progressFile)
-	// 			if err != nil {
-	// 				continue
-	// 			}
-	// 			text := strings.TrimSpace(string(data))
-	// 			if text != "" {
-	// 				cmd.Session.ChannelMessageEdit(initMsg.ChannelID, initMsg.ID,
-	// 					fmt.Sprintf("`%s`", text),
-	// 				)
-	// 			}
-	// 		}
-	// 	}
-	// }()
 
 	fp, err := discord.NewFilePollMessage(
 		discord.ConcreteSession{Session: cmd.Session},
@@ -372,11 +337,18 @@ func (cmd *StableAudioCommand) Apply() error {
 
 	// Run the command
 	if err := command.Run(); err != nil {
-		// errMsg := fmt.Sprintf("Error during audio generation: %v", err)
-		// cmd.Session.ChannelMessageEdit(cmd.Message.ChannelID, initMsg.ID, errMsg)
+		err = fmt.Errorf("error during audio generation: %w", err)
+		if stopErr := fp.Stop(); stopErr != nil {
+			err = fmt.Errorf("%w; during handling, another error occurred: %w", err, stopErr)
+		}
+		slog.Error(err.Error())
+
+		if _, sendErr := cmd.Session.ChannelMessageEdit(cmd.Message.ChannelID, fp.Message.MessageID, err.Error()); sendErr != nil {
+			err = fmt.Errorf("%w; when editing discord, another error occurred: %w", err, sendErr)
+		}
+
 		return err
 	}
-	// close(done)
 
 	// Send the resulting audio file back to the Discord channel
 	file, err := os.Open(outFile)
