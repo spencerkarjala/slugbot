@@ -292,6 +292,7 @@ func (cmd *StableAudioCommand) Apply() error {
 	fp, err := discord.NewFilePollMessage(
 		discord.ConcreteSession{Session: cmd.Session},
 		cmd.Message.ChannelID,
+		triggeringMessage.MessageID,
 		1*time.Second,
 	)
 	if err != nil {
