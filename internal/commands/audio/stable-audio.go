@@ -343,8 +343,14 @@ func (cmd *StableAudioCommand) Apply() error {
 		}
 		slog.Error(err.Error())
 
-		if _, sendErr := cmd.Session.ChannelMessageEdit(cmd.Message.ChannelID, fp.Message.MessageID, err.Error()); sendErr != nil {
-			err = fmt.Errorf("%w; when editing discord, another error occurred: %w", err, sendErr)
+		errorMessage, createMessageErr := discord.NewMessage(discord.ConcreteSession{Session: cmd.Session}, cmd.Message.ChannelID)
+		if createMessageErr != nil {
+			err = fmt.Errorf("%w; when creating a new discord message, another error occurred: %w", err, createMessageErr)
+			return err
+		}
+
+		if sendMessageErr := errorMessage.Create(err.Error()); sendMessageErr != nil {
+			err = fmt.Errorf("%w; when sending the error message to discord, another error occurred: %w", err, sendMessageErr)
 		}
 
 		return err

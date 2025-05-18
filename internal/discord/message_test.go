@@ -50,37 +50,74 @@ func (f *fakeAPI) ChannelMessageDelete(channelID string, messageID string) error
 func TestNewMessage_Success(t *testing.T) {
 	api := &fakeAPI{CheckError: nil}
 
-	m, err := NewMessage(api, "chan", "replied")
+	m, err := NewMessage(api, "chan")
 	require.NoError(t, err)
 	require.Equal(t, "chan", m.ChannelID)
-	require.Equal(t, "replied", m.RepliedToMessageID)
+	require.Equal(t, "", m.RepliedToMessageID)
 }
 
 func TestNewMessage_NilSession(t *testing.T) {
 	api := &fakeAPI{CheckError: errors.New("invalid")}
 
-	_, err := NewMessage(api, "chan", "replied")
+	_, err := NewMessage(api, "chan")
 	require.Error(t, err)
 }
 
 func TestNewMessage_EmptyChannelID(t *testing.T) {
 	api := &fakeAPI{CheckError: nil}
 
-	_, err := NewMessage(api, "", "replied")
+	_, err := NewMessage(api, "")
 	require.Error(t, err)
 }
 
-func TestNewMessage_EmptyReplyMessageID(t *testing.T) {
+// NewReplyMessage tests
+func TestNewReplyMessage_Success(t *testing.T) {
 	api := &fakeAPI{CheckError: nil}
 
-	_, err := NewMessage(api, "chan", "")
+	m, err := NewReplyMessage(api, "chan", "replied")
+	require.NoError(t, err)
+	require.Equal(t, "chan", m.ChannelID)
+	require.Equal(t, "replied", m.RepliedToMessageID)
+}
+
+func TestNewReplyMessage_NilSession(t *testing.T) {
+	api := &fakeAPI{CheckError: errors.New("invalid")}
+
+	_, err := NewReplyMessage(api, "chan", "replied")
+	require.Error(t, err)
+}
+
+func TestNewReplyMessage_EmptyChannelID(t *testing.T) {
+	api := &fakeAPI{CheckError: nil}
+
+	_, err := NewReplyMessage(api, "", "replied")
+	require.Error(t, err)
+}
+
+func TestNewReplyMessage_EmptyReplyMessageID(t *testing.T) {
+	api := &fakeAPI{CheckError: nil}
+
+	_, err := NewReplyMessage(api, "chan", "")
 	require.Error(t, err)
 }
 
 // Message.Create tests
-func TestCreate_Success(t *testing.T) {
+func TestCreate_SuccessNoReply(t *testing.T) {
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: "sent123"}}
-	m, _ := NewMessage(api, "chan", "replied")
+	m, _ := NewMessage(api, "chan")
+
+	require.Equal(t, "", m.MessageID)
+	err := m.Create("hello")
+	require.NoError(t, err)
+	require.Equal(t, "sent123", m.MessageID)
+
+	require.Equal(t, 1, len(api.data.calls))
+	require.Equal(t, []string{"ChannelMessageSend", "chan", "hello"}, api.data.calls[0])
+}
+
+func TestCreate_SuccessWithReply(t *testing.T) {
+	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: "sent123"}}
+	m, _ := NewReplyMessage(api, "chan", "replied")
 
 	require.Equal(t, "", m.MessageID)
 	err := m.Create("hello")
@@ -94,7 +131,7 @@ func TestCreate_Success(t *testing.T) {
 
 func TestCreate_InvalidSession(t *testing.T) {
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: "sent123"}}
-	m, _ := NewMessage(api, "chan", "replied")
+	m, _ := NewReplyMessage(api, "chan", "replied")
 	api.CheckError = errors.New("invalid")
 
 	err := m.Create("content")
@@ -105,7 +142,7 @@ func TestCreate_InvalidSession(t *testing.T) {
 
 func TestCreate_EmptyChannelID(t *testing.T) {
 	api := &fakeAPI{CheckError: nil}
-	m, _ := NewMessage(api, "chan", "replied")
+	m, _ := NewReplyMessage(api, "chan", "replied")
 	m.ChannelID = ""
 
 	err := m.Create("content")
@@ -116,19 +153,8 @@ func TestCreate_EmptyChannelID(t *testing.T) {
 
 func TestCreate_AlreadyHasMessageID(t *testing.T) {
 	api := &fakeAPI{CheckError: nil}
-	m, _ := NewMessage(api, "chan", "replied")
+	m, _ := NewReplyMessage(api, "chan", "replied")
 	m.MessageID = "abcde"
-
-	err := m.Create("content")
-	require.Error(t, err)
-
-	require.Equal(t, 0, len(api.data.calls))
-}
-
-func TestCreate_EmptyReplyToMessageID(t *testing.T) {
-	api := &fakeAPI{CheckError: nil}
-	m, _ := NewMessage(api, "chan", "replied")
-	m.RepliedToMessageID = ""
 
 	err := m.Create("content")
 	require.Error(t, err)
@@ -138,7 +164,7 @@ func TestCreate_EmptyReplyToMessageID(t *testing.T) {
 
 func TestCreate_CreateError(t *testing.T) {
 	api := &fakeAPI{CheckError: nil, CreateError: errors.New("fail")}
-	m, _ := NewMessage(api, "chan", "replied")
+	m, _ := NewReplyMessage(api, "chan", "replied")
 
 	err := m.Create("content")
 	require.Error(t, err)
@@ -156,7 +182,7 @@ func TestUpdate_Success(t *testing.T) {
 	updatedContent := "updated-content-str"
 
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: createdMsgID}}
-	m, _ := NewMessage(api, channelID, repliedMsgID)
+	m, _ := NewReplyMessage(api, channelID, repliedMsgID)
 
 	_ = m.Create(initialContent)
 	err := m.Update(updatedContent)
@@ -175,7 +201,7 @@ func TestUpdate_InvalidSession(t *testing.T) {
 	updatedContent := "updated-content-str"
 
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: createdMsgID}}
-	m, _ := NewMessage(api, channelID, repliedMsgID)
+	m, _ := NewReplyMessage(api, channelID, repliedMsgID)
 	_ = m.Create(initialContent)
 
 	api.CheckError = errors.New("invalid api")
@@ -192,7 +218,7 @@ func TestUpdate_EmptyChannelID(t *testing.T) {
 	updatedContent := "updated-content-str"
 
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: createdMsgID}}
-	m, _ := NewMessage(api, channelID, repliedMsgID)
+	m, _ := NewReplyMessage(api, channelID, repliedMsgID)
 	_ = m.Create(initialContent)
 
 	m.ChannelID = ""
@@ -209,7 +235,7 @@ func TestUpdate_ValidateMessageID(t *testing.T) {
 	updatedContent := "updated-content-str"
 
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: createdMsgID}}
-	m, _ := NewMessage(api, channelID, repliedMsgID)
+	m, _ := NewReplyMessage(api, channelID, repliedMsgID)
 	_ = m.Create(initialContent)
 
 	m.MessageID = ""
@@ -226,7 +252,7 @@ func TestUpdate_EditError(t *testing.T) {
 	updatedContent := "updated-content-str"
 
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: createdMsgID}}
-	m, _ := NewMessage(api, channelID, repliedMsgID)
+	m, _ := NewReplyMessage(api, channelID, repliedMsgID)
 	_ = m.Create(initialContent)
 
 	api.EditError = errors.New("fail editing message")
@@ -246,7 +272,7 @@ func TestDelete_Success(t *testing.T) {
 	updatedContent := "updated-content-str"
 
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: createdMsgID}}
-	m, _ := NewMessage(api, channelID, repliedMsgID)
+	m, _ := NewReplyMessage(api, channelID, repliedMsgID)
 	_ = m.Create(initialContent)
 	_ = m.Update(updatedContent)
 
@@ -268,7 +294,7 @@ func TestDelete_InvalidSession(t *testing.T) {
 	updatedContent := "updated-content-str"
 
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: createdMsgID}}
-	m, _ := NewMessage(api, channelID, repliedMsgID)
+	m, _ := NewReplyMessage(api, channelID, repliedMsgID)
 	_ = m.Create(initialContent)
 	_ = m.Update(updatedContent)
 
@@ -286,7 +312,7 @@ func TestDelete_EmptyChannelID(t *testing.T) {
 	updatedContent := "updated-content-str"
 
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: createdMsgID}}
-	m, _ := NewMessage(api, channelID, repliedMsgID)
+	m, _ := NewReplyMessage(api, channelID, repliedMsgID)
 	_ = m.Create(initialContent)
 	_ = m.Update(updatedContent)
 
@@ -304,7 +330,7 @@ func TestDelete_EmptyMessageID(t *testing.T) {
 	updatedContent := "updated-content-str"
 
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: createdMsgID}}
-	m, _ := NewMessage(api, channelID, repliedMsgID)
+	m, _ := NewReplyMessage(api, channelID, repliedMsgID)
 	_ = m.Create(initialContent)
 	_ = m.Update(updatedContent)
 
@@ -322,7 +348,7 @@ func TestDelete_NotFound(t *testing.T) {
 	updatedContent := "updated-content-str"
 
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: createdMsgID}, DeleteError: ErrUnknownMessage}
-	m, _ := NewMessage(api, channelID, repliedMsgID)
+	m, _ := NewReplyMessage(api, channelID, repliedMsgID)
 	_ = m.Create(initialContent)
 	_ = m.Update(updatedContent)
 
@@ -340,7 +366,7 @@ func TestDelete_OtherDeleteError(t *testing.T) {
 	updatedContent := "updated-content-str"
 
 	api := &fakeAPI{CheckError: nil, CreateError: nil, MsgReturnedFromCreate: ConcreteMessage{ID: createdMsgID}, DeleteError: errors.New("non-404-delete-error")}
-	m, _ := NewMessage(api, channelID, repliedMsgID)
+	m, _ := NewReplyMessage(api, channelID, repliedMsgID)
 	_ = m.Create(initialContent)
 	_ = m.Update(updatedContent)
 

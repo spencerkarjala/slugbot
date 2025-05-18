@@ -13,7 +13,23 @@ type Message struct {
 }
 
 // Create a new unsent Message
-func NewMessage(api SessionAPI, channelID string, repliedToMessageID string) (*Message, error) {
+func NewMessage(api SessionAPI, channelID string) (*Message, error) {
+	if err := api.Check(); err != nil {
+		return nil, fmt.Errorf("NewMessage: encountered error: %w", err)
+	}
+	if channelID == "" {
+		return nil, fmt.Errorf("NewMessage: received empty channelID string")
+	}
+	return &Message{
+		API:                api,
+		ChannelID:          channelID,
+		MessageID:          "",
+		RepliedToMessageID: "",
+	}, nil
+}
+
+// Create a new unsent Message that replies to another message
+func NewReplyMessage(api SessionAPI, channelID string, repliedToMessageID string) (*Message, error) {
 	if err := api.Check(); err != nil {
 		return nil, fmt.Errorf("NewMessage: encountered error: %w", err)
 	}
@@ -42,11 +58,15 @@ func (m *Message) Create(messageContent string) error {
 	if m.MessageID != "" {
 		return fmt.Errorf("Create failed validation: message ID is already set")
 	}
+
+	var msg ConcreteMessage
+	var err error
 	if m.RepliedToMessageID == "" {
-		return fmt.Errorf("Create failed validation: ID of message to reply to is unset")
+		msg, err = m.API.ChannelMessageSend(m.ChannelID, messageContent)
+	} else {
+		msg, err = m.API.ChannelMessageSendReply(m.ChannelID, messageContent, m.RepliedToMessageID)
 	}
 
-	msg, err := m.API.ChannelMessageSendReply(m.ChannelID, messageContent, m.RepliedToMessageID)
 	if err != nil {
 		return fmt.Errorf("Create request: encountered error: %w", err)
 	}
