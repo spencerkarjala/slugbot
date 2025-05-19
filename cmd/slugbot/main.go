@@ -20,16 +20,15 @@ import (
 
 // Create mapping from command strings to factory functions for each command type
 var commandHandlers = map[string]func() commands.CommandHandler{
-	"arc":     func() commands.CommandHandler { return &image.ArcDistortCommand{} },
-	"barrel":  func() commands.CommandHandler { return &image.BarrelDistortCommand{} },
-	"ibarrel": func() commands.CommandHandler { return &image.InverseBarrelDistortCommand{} },
-	"polar":   func() commands.CommandHandler { return &image.PolarDistortCommand{} },
-	"ipolar":  func() commands.CommandHandler { return &image.InversePolarDistortCommand{} },
-	".saudio": func() commands.CommandHandler { return &audio.StableAudioCommand{} },
+	"arc":       func() commands.CommandHandler { return &image.ArcDistortCommand{} },
+	"barrel":    func() commands.CommandHandler { return &image.BarrelDistortCommand{} },
+	"ibarrel":   func() commands.CommandHandler { return &image.InverseBarrelDistortCommand{} },
+	"polar":     func() commands.CommandHandler { return &image.PolarDistortCommand{} },
+	"ipolar":    func() commands.CommandHandler { return &image.InversePolarDistortCommand{} },
+	".saudio":   func() commands.CommandHandler { return &audio.StableAudioCommand{} },
+	"```saudio": func() commands.CommandHandler { return &audio.StableAudioWithConfigCommand{} },
+	".slimit":   func() commands.CommandHandler { return &audio.LimitCommand{} },
 }
-
-var audioQueues = make(map[string]*exec.TaskQueue)
-var audioQueueViews = make(map[string]*exec.TaskQueueView)
 
 var audioQueue = *exec.NewTaskQueue()
 var audioQueueView *exec.TaskQueueView
@@ -61,11 +60,17 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 	if message == nil || message.Author == nil || message.Author.Bot {
 		return
 	}
-	if !strings.HasPrefix(message.Content, ".sim") && !strings.HasPrefix(message.Content, ".saudio") {
+
+	content := strings.TrimSpace(message.Content)
+	if len(content) < 1 {
 		return
 	}
 
 	parts := strings.Fields(message.Content)
+
+	if parts[0] != ".sim" && parts[0] != ".saudio" && parts[0] != ".saudiosm" && parts[0] != ".slimit" && parts[0] != "```saudio" {
+		return
+	}
 
 	if parts[0] == ".imagine" {
 		return
@@ -104,6 +109,50 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 		}
 
 		audioQueue.Enqueue(stableAudioCommand)
+		return
+	}
+
+	if parts[0] == "```saudio" {
+		commandConstructor, ok := commandHandlers["```saudio"]
+		if !ok {
+			session.ChannelMessageSend(message.ChannelID, "Error occured while processing .saudio prompt")
+			return
+		}
+		command := commandConstructor()
+		command.SetContext(session, message)
+
+		if audioQueueView == nil {
+			audioQueueView := *exec.NewTaskQueueView(&audioQueue, session, message.ChannelID)
+			go UpdateQueueViewCallback(&audioQueueView)
+		}
+
+		stableAudioCommand, ok := command.(*audio.StableAudioWithConfigCommand)
+		if !ok {
+			slog.Fatal("somehow created a non-Stable-Audio command from ```saudio prompt")
+			return
+		}
+
+		audioQueue.Enqueue(stableAudioCommand)
+		return
+	}
+
+	if parts[0] == ".slimit" {
+		commandConstructor, ok := commandHandlers[".slimit"]
+		if !ok {
+			session.ChannelMessageSend(message.ChannelID, "Error occurred while processing .slimit prompt")
+			return
+		}
+		command := commandConstructor()
+		command.SetContext(session, message)
+
+		slimitCommand, ok := command.(*audio.LimitCommand)
+		if !ok || slimitCommand == nil {
+			slog.Fatal("somehow created a non-limit command from .slimit prompt")
+			return
+		}
+
+		slog.Info("applying .slimit command...")
+		slimitCommand.Apply()
 		return
 	}
 
