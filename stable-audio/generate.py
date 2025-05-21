@@ -303,7 +303,7 @@ def shared_model_invocation(args, inv_type) -> None:
                 ]
                 negative_conditioning_tensors = model.conditioner(negative_conditioning, device)
 
-            print(f"Generating {args['length']}s audio with {args['steps']} steps...", flush=True)
+            print(f"Generating {args['length']}s audio with {args['steps']} steps and cfg_scale={args['cfg_scale']}...", flush=True)
             output = infer(
                 args,
                 audio2audio_conditioning,
@@ -373,7 +373,7 @@ def shared_model_invocation(args, inv_type) -> None:
                 negative_conditioning_tensors = uncond_negative_tensors_batched
 
             if inv_type == InvocationType.INPAINT:
-                print(f"Inpainting {args['init_audio']} with {args['steps']} steps...", flush=True)
+                print(f"Inpainting {args['init_audio']} with {args['steps']} steps and cfg_scale={args['cfg_scale']}...", flush=True)
 
                 inpaint_mask = torch.ones(1, sample_size, device=device)
                 for _slice_name, time_range_seconds in args["inpaint"].items():
@@ -404,7 +404,7 @@ def shared_model_invocation(args, inv_type) -> None:
 
             else:
                 print(
-                    f"Generating {args['length']}s audio with {args['steps']} steps...", flush=True
+                    f"Generating {args['length']}s audio with {args['steps']} steps and cfg_scale={args['cfg_scale']}...", flush=True
                 )
                 output = infer(
                     args,
@@ -459,7 +459,12 @@ def simple_prompt() -> None:
         **default_cfg,
         **{k: v for k, v1 in args.items() if (v := v1) is not None},
     }  # Overwrite default vals when specified
-    args["cfg_scale"] = 7.0 if args["init_audio"] is None else 150.0
+
+    if args["init_audio"] is not None and args["cfg_scale"] == parser.get_default("cfg_scale"):
+        args["cfg_scale"] = 125.0
+
+    # args["cfg_scale"] = args["strength"]
+    # args["cfg_scale"] = args["strength"] if args["init_audio"] is None else 150.0
 
     shared_model_invocation(args, InvocationType.SPROMPT)
 
@@ -478,6 +483,8 @@ def toml_prompt() -> None:
         if toml.get("config") is not None:
             args = default_cfg | toml["config"]
 
+        print("got TOML: ")
+        print(toml)
         prompts = toml.get("prompts", None)
         if prompts is None:
             print("No prompts received. Exiting...")

@@ -18,6 +18,29 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+func normalizeTOML(s string) string {
+	return unicodeQuoteReplacer.Replace(s)
+}
+
+var unicodeQuoteReplacer = strings.NewReplacer(
+	// curved quotes
+	"\u201C", `"`, "\u201D", `"`,
+	"\u2018", `'`, "\u2019", `'`,
+	// angle
+	"\u00AB", `"`, "\u00BB", `"`,
+	"\u2039", `'`, "\u203A", `'`,
+	// low-9 / other
+	"\u201A", `"`, "\u201E", `"`, "\u201B", `'`,
+	// fullwidth
+	"\uFF02", `"`, "\uFF07", `'`,
+	// fancy primes
+	"\u2032", `"`, "\u2033", `"`,
+	// BOM / zero-width
+	"\uFEFF", "", "\u200B", "",
+	// NBSP → space
+	"\u00A0", " ",
+)
+
 type StableAudioWithConfigCommand struct {
 	commands.Command
 	traits.Promptable
@@ -97,6 +120,8 @@ func (cmd *StableAudioWithConfigCommand) Apply() error {
 	}
 
 	content := cmd.Message.Content[9 : len(cmd.Message.Content)-3]
+
+	content = normalizeTOML(content)
 	params, err := ParseTOML(content)
 	if err != nil {
 		return fmt.Errorf("failed to parse toml: %w", err)
@@ -107,11 +132,7 @@ func (cmd *StableAudioWithConfigCommand) Apply() error {
 		ChannelID: cmd.Message.ChannelID,
 	}
 
-	parts := strings.SplitN(strings.TrimSpace(cmd.Message.Content), "\n", 2)
-	if len(parts) < 2 {
-		return errors.New("invalid saudio block")
-	}
-	toml := strings.TrimSuffix(parts[1], "```")
+	toml := content
 
 	fp, err := discord.NewFilePollMessage(
 		discord.ConcreteSession{Session: cmd.Session},

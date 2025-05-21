@@ -27,6 +27,7 @@ var commandHandlers = map[string]func() commands.CommandHandler{
 	"ipolar":    func() commands.CommandHandler { return &image.InversePolarDistortCommand{} },
 	".saudio":   func() commands.CommandHandler { return &audio.StableAudioCommand{} },
 	"```saudio": func() commands.CommandHandler { return &audio.StableAudioWithConfigCommand{} },
+	"```toml":   func() commands.CommandHandler { return &audio.StableAudioWithConfigCommand{} },
 	".slimit":   func() commands.CommandHandler { return &audio.LimitCommand{} },
 }
 
@@ -68,7 +69,7 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 
 	parts := strings.Fields(message.Content)
 
-	if parts[0] != ".sim" && parts[0] != ".saudio" && parts[0] != ".saudiosm" && parts[0] != ".slimit" && parts[0] != "```saudio" {
+	if parts[0] != ".sim" && parts[0] != ".saudio" && parts[0] != ".saudiosm" && parts[0] != ".slimit" && parts[0] != "```saudio" && parts[0] != "```toml" {
 		return
 	}
 
@@ -112,7 +113,7 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 		return
 	}
 
-	if parts[0] == "```saudio" {
+	if parts[0] == "```saudio" || parts[0] == "```toml" {
 		commandConstructor, ok := commandHandlers["```saudio"]
 		if !ok {
 			session.ChannelMessageSend(message.ChannelID, "Error occured while processing .saudio prompt")
