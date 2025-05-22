@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +31,34 @@ var commandHandlers = map[string]func() commands.CommandHandler{
 	"```toml":   func() commands.CommandHandler { return &audio.StableAudioWithConfigCommand{} },
 	".slimit":   func() commands.CommandHandler { return &audio.LimitCommand{} },
 }
+
+const usage = `Usage: .saudio [flags] <prompt words>
+
+  <prompt words>
+        collection of all the non-flag strings that make up your prompt
+
+Flags:
+  --help, -h, --usage
+        display this help message
+
+  --negative
+        if present, makes all of the prompt words that follow this flag negative
+
+  --strength int
+        how strongly the model follows your prompt
+        default: 7    (turning it up can actually worsen quality)
+
+  --seed int
+        RNG seed for generation; default is a random positive integer
+
+  --steps int
+        number of diffusion iterations; default: 100
+        note: values ≫100 rarely improve results and can hang the bot
+
+  --length int
+        length of the audio clip to generate, in seconds; default: 30
+        best quality at ~30s; >85s may exhaust GPU VRAM
+`
 
 var audioQueue = *exec.NewTaskQueue()
 var audioQueueView *exec.TaskQueueView
@@ -103,6 +132,11 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 		// finally, set the prompt
 		parts = append(parts, "--small")
 		stableAudioCommand.SetPrompt(strings.Join(parts[1:], " "))
+
+		if slices.Contains(parts, "--help") || slices.Contains(parts, "-h") || slices.Contains(parts, "--usage") {
+			session.ChannelMessageSend(message.ChannelID, "```\n"+usage+"\n```")
+			return
+		}
 
 		if audioQueueView == nil {
 			audioQueueView := *exec.NewTaskQueueView(&audioQueue, session, message.ChannelID)
