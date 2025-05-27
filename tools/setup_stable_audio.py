@@ -35,7 +35,17 @@ def main():
     # Create environment if missing
     if not ENV_DIR.exists():
         print(f"Creating Conda environment at {ENV_DIR} with Python {PYTHON_VERSION}...")
-        run([conda_cmd, "create", "--yes", "--prefix", str(ENV_DIR), f"python={PYTHON_VERSION}", "pip"])
+        run(
+            [
+                conda_cmd,
+                "create",
+                "--yes",
+                "--prefix",
+                str(ENV_DIR),
+                f"python={PYTHON_VERSION}",
+                "pip",
+            ]
+        )
     else:
         print(f"Using existing Conda environment at {ENV_DIR}")
 
@@ -48,10 +58,7 @@ def main():
     run(pip_cmd + ["--prefer-binary", "stable-audio-tools"])
 
     print("Verifying installation...")
-    run([
-        conda_cmd, "run", "--prefix", str(ENV_DIR),
-        "pip", "show", "stable-audio-tools"
-    ])
+    run([conda_cmd, "run", "--prefix", str(ENV_DIR), "pip", "show", "stable-audio-tools"])
 
     print("Done.")
 

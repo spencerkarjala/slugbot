@@ -17,6 +17,7 @@ from typing import TextIO
 import numpy as np
 from stable_audio_tools import get_pretrained_model
 from pyparsing import *
+
 # Reduce fragmentation in PyTorch allocator
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -35,7 +36,12 @@ from einops import rearrange
 from stable_audio_tools.models.factory import create_model_from_config
 from stable_audio_tools.models.utils import load_ckpt_state_dict
 from stable_audio_tools.models.utils import copy_state_dict
-from stable_audio_tools.inference.generation import generate_diffusion_cond, generate_diffusion_cond_inpaint
+
+from stable_audio_tools.inference.generation import (
+    generate_diffusion_cond,
+    generate_diffusion_cond_inpaint,
+)
+
 from stable_audio_tools.inference.utils import prepare_audio
 
 from pyparsing import (
@@ -79,32 +85,37 @@ default_cfg = {
 
 class InvocationType(Enum):
     AUDIO2AUDIO = 1 # Unused
+
     SPROMPT = 2
     NPROMPT = 3
     INPAINT = 4
+
 
 class ProgressWriter:
     """
     Wraps a stream to capture tqdm-style progress bars (which use '\r')
     and write the latest line to a file on each carriage return.
     """
+
     def __init__(self, stream: TextIO, fname: str) -> None:
         self._stream = stream
         self._fname = fname
+
     def write(self, data: str) -> None:
         # Forward incoming data back to the original stream
         self._stream.write(data)
 
         # If it doesn't start with a carriage return, it's probably not a progress bar,
         # so just skip it
-        if not data or data[0] != '\r':
+        if not data or data[0] != "\r":
             return
-        
+
         try:
-            with open(self._fname, 'w') as f:
-                f.write("`" + data[1:].rstrip('\n') + "`")
+            with open(self._fname, "w") as f:
+                f.write("`" + data[1:].rstrip("\n") + "`")
         except Exception:
             pass
+
     def flush(self) -> None:
         self._stream.flush()
 
@@ -115,7 +126,6 @@ def get_project_dir(start_dir: Path = Path.cwd()) -> Path:
         if (p / ".git").is_dir():
             return p
     raise FileNotFoundError(f"No project dir found as a parent of '{start_dir}'")
-
 
 def infer(args, device, model, model_config, conditioning_tensors, negative_conditioning_tensors, audio):
     target_sample_rate = int(model_config.get("sample_rate"))
@@ -153,11 +163,13 @@ def create_model(args):
         config_path = (project_dir / STABLE_AUDIO_OPEN_SMALL_PATH) / "model_config.json"
         ckpt_path = (project_dir / STABLE_AUDIO_OPEN_SMALL_PATH) / "model.ckpt"
         args['sampler'] = "pingpong" # sao-small only supports pingpong sampler
+
     else:
         config_path = (project_dir / STABLE_AUDIO_OPEN_1_0_PATH) / "model_config.json"
         ckpt_path = (project_dir / STABLE_AUDIO_OPEN_1_0_PATH) / "model.ckpt"
 
     # If a progress file was indicated, create it to track progress, then delete it on cleanup
+
     if args['progress_file'] is not None:
         try:
             open(args['progress_file'], 'w').close()
@@ -175,11 +187,13 @@ def create_model(args):
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
+
     with open(config_path) as f:
         model_config = json.load(f)
 
     if args['length'] != default_cfg['length']:
         model_config["sample_size"] = model_config["sample_rate"] * args['length']
+
 
     print(f"Creating model from config {config_path} on device {device}:")
     model = create_model_from_config(model_config)
@@ -204,13 +218,17 @@ def create_model(args):
 def massage_audio(args, device, model_config):
     target_sample_rate = int(model_config.get("sample_rate"))
 
+    n_samples = args["length"] * target_sample_rate
+
     audio2audio_conditioning = None
+
     if args['init_audio'] is not None:
         in_waveform, in_sample_rate = torchaudio.load(args['init_audio'])
         in_waveform = in_waveform[..., : in_sample_rate * args['length']]
         if in_sample_rate != target_sample_rate:
             print(f"Resampling input audio from sample rate {in_sample_rate} to {target_sample_rate}")
             resampler = torchaudio.transforms.Resample(orig_freq=in_sample_rate, new_freq=target_sample_rate)
+
             in_waveform = resampler(in_waveform)
             in_sample_rate = target_sample_rate
             print(" - done")
@@ -383,6 +401,7 @@ def main() -> None:
 
     output = infer(args, device, model, model_config, pe, npe, audio_cond)
 
+
     # Reshape and normalize to PCM16
     audio = rearrange(output, "b d n -> d (b n)")
     audio = audio.to(torch.float32)
@@ -392,6 +411,7 @@ def main() -> None:
     # Save output
     torchaudio.save(args['output'], audio, model_config.get("sample_rate"))
     print(f"Saved audio to {args['output']}", flush=True)
+
 
 if __name__ == "__main__":
     main()

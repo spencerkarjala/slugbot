@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,16 +21,44 @@ import (
 
 // Create mapping from command strings to factory functions for each command type
 var commandHandlers = map[string]func() commands.CommandHandler{
-	"arc":     func() commands.CommandHandler { return &image.ArcDistortCommand{} },
-	"barrel":  func() commands.CommandHandler { return &image.BarrelDistortCommand{} },
-	"ibarrel": func() commands.CommandHandler { return &image.InverseBarrelDistortCommand{} },
-	"polar":   func() commands.CommandHandler { return &image.PolarDistortCommand{} },
-	"ipolar":  func() commands.CommandHandler { return &image.InversePolarDistortCommand{} },
-	".saudio": func() commands.CommandHandler { return &audio.StableAudioCommand{} },
+	"arc":       func() commands.CommandHandler { return &image.ArcDistortCommand{} },
+	"barrel":    func() commands.CommandHandler { return &image.BarrelDistortCommand{} },
+	"ibarrel":   func() commands.CommandHandler { return &image.InverseBarrelDistortCommand{} },
+	"polar":     func() commands.CommandHandler { return &image.PolarDistortCommand{} },
+	"ipolar":    func() commands.CommandHandler { return &image.InversePolarDistortCommand{} },
+	".saudio":   func() commands.CommandHandler { return &audio.StableAudioCommand{} },
+	"```saudio": func() commands.CommandHandler { return &audio.StableAudioWithConfigCommand{} },
+	"```toml":   func() commands.CommandHandler { return &audio.StableAudioWithConfigCommand{} },
+	".slimit":   func() commands.CommandHandler { return &audio.LimitCommand{} },
 }
 
-var audioQueues = make(map[string]*exec.TaskQueue)
-var audioQueueViews = make(map[string]*exec.TaskQueueView)
+const usage = `Usage: .saudio [flags] <prompt words>
+
+  <prompt words>
+        collection of all the non-flag strings that make up your prompt
+
+Flags:
+  --help, -h, --usage
+        display this help message
+
+  --negative
+        if present, makes all of the prompt words that follow this flag negative
+
+  --strength int
+        how strongly the model follows your prompt
+        default: 7    (turning it up can actually worsen quality)
+
+  --seed int
+        RNG seed for generation; default is a random positive integer
+
+  --steps int
+        number of diffusion iterations; default: 100
+        note: values ≫100 rarely improve results and can hang the bot
+
+  --length int
+        length of the audio clip to generate, in seconds; default: 30
+        best quality at ~30s; >85s may exhaust GPU VRAM
+`
 
 var audioQueue = *exec.NewTaskQueue()
 var audioQueueView *exec.TaskQueueView
@@ -61,11 +90,17 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 	if message == nil || message.Author == nil || message.Author.Bot {
 		return
 	}
-	if !strings.HasPrefix(message.Content, ".sim") && !strings.HasPrefix(message.Content, ".saudio") {
+
+	content := strings.TrimSpace(message.Content)
+	if len(content) < 1 {
 		return
 	}
 
 	parts := strings.Fields(message.Content)
+
+	if parts[0] != ".sim" && parts[0] != ".saudio" && parts[0] != ".saudiosm" && parts[0] != ".slimit" && parts[0] != "```saudio" && parts[0] != "```toml" {
+		return
+	}
 
 	if parts[0] == ".imagine" {
 		return
@@ -98,12 +133,61 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 		parts = append(parts, "--small")
 		stableAudioCommand.SetPrompt(strings.Join(parts[1:], " "))
 
+		if slices.Contains(parts, "--help") || slices.Contains(parts, "-h") || slices.Contains(parts, "--usage") {
+			session.ChannelMessageSend(message.ChannelID, "```\n"+usage+"\n```")
+			return
+		}
+
 		if audioQueueView == nil {
 			audioQueueView := *exec.NewTaskQueueView(&audioQueue, session, message.ChannelID)
 			go UpdateQueueViewCallback(&audioQueueView)
 		}
 
 		audioQueue.Enqueue(stableAudioCommand)
+		return
+	}
+
+	if parts[0] == "```saudio" || parts[0] == "```toml" {
+		commandConstructor, ok := commandHandlers["```saudio"]
+		if !ok {
+			session.ChannelMessageSend(message.ChannelID, "Error occured while processing .saudio prompt")
+			return
+		}
+		command := commandConstructor()
+		command.SetContext(session, message)
+
+		if audioQueueView == nil {
+			audioQueueView := *exec.NewTaskQueueView(&audioQueue, session, message.ChannelID)
+			go UpdateQueueViewCallback(&audioQueueView)
+		}
+
+		stableAudioCommand, ok := command.(*audio.StableAudioWithConfigCommand)
+		if !ok {
+			slog.Fatal("somehow created a non-Stable-Audio command from ```saudio prompt")
+			return
+		}
+
+		audioQueue.Enqueue(stableAudioCommand)
+		return
+	}
+
+	if parts[0] == ".slimit" {
+		commandConstructor, ok := commandHandlers[".slimit"]
+		if !ok {
+			session.ChannelMessageSend(message.ChannelID, "Error occurred while processing .slimit prompt")
+			return
+		}
+		command := commandConstructor()
+		command.SetContext(session, message)
+
+		slimitCommand, ok := command.(*audio.LimitCommand)
+		if !ok || slimitCommand == nil {
+			slog.Fatal("somehow created a non-limit command from .slimit prompt")
+			return
+		}
+
+		slog.Info("applying .slimit command...")
+		slimitCommand.Apply()
 		return
 	}
 
