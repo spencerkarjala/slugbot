@@ -12,11 +12,11 @@ import shutil
 import sys
 import tempfile
 from functools import reduce
-import tomllib
 from typing import TextIO
 
 import numpy as np
 from stable_audio_tools import get_pretrained_model
+from pyparsing import *
 
 # Reduce fragmentation in PyTorch allocator
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -28,6 +28,7 @@ from enum import Enum
 from pathlib import Path
 from sys import stdin
 from tomllib import loads
+from functools import partial
 
 import torch
 import torchaudio
@@ -35,33 +36,56 @@ from einops import rearrange
 from stable_audio_tools.models.factory import create_model_from_config
 from stable_audio_tools.models.utils import load_ckpt_state_dict
 from stable_audio_tools.models.utils import copy_state_dict
+
 from stable_audio_tools.inference.generation import (
     generate_diffusion_cond,
     generate_diffusion_cond_inpaint,
 )
+
 from stable_audio_tools.inference.utils import prepare_audio
+
+from pyparsing import (
+    Literal,
+    Word,
+    Group,
+    Forward,
+    alphas,
+    alphanums,
+    Regex,
+    Combine,
+    OneOrMore,
+    ParseException,
+    CaselessKeyword,
+    Suppress,
+    delimitedList,
+    Char,
+    printables,
+)
+import math
+import operator
+from parser import *
 
 STABLE_AUDIO_OPEN_1_0_PATH = "models/stable-audio-open-1.0"
 STABLE_AUDIO_OPEN_SMALL_PATH = "models/stable-audio-open-small"
 
 # Omit prompt, negprompt, and cfg_scale as these are no longer generic
 default_cfg = {
-    "prompt": None,
-    "negative_prompt": None,
-    "output": "output.wav",
-    "length": 30,
-    "steps": 100,
-    "cfg_scale": 7.0,
-    "sampler": "dpmpp-3m-sde",
-    "progress_file": None,
-    "init_audio": None,
-    "seed": -1,
-    "small": False,
+    'prompt': None,
+    'negative_prompt': None,
+    'output': 'output.wav',
+    'length': 30,
+    'steps': 100,
+    'cfg_scale': 7.0,
+    'sampler': 'dpmpp-3m-sde',
+    'progress_file': None,
+    'init_audio': None,
+    'seed': -1,
+    'small': False,
 }
 
-
 class InvocationType(Enum):
-    AUDIO2AUDIO = 1  # Unused
+    AUDIO2AUDIO = 1 # Unused
+
     SPROMPT = 2
     NPROMPT = 3
     INPAINT = 4
@@ -103,39 +127,28 @@ def get_project_dir(start_dir: Path = Path.cwd()) -> Path:
             return p
     raise FileNotFoundError(f"No project dir found as a parent of '{start_dir}'")
 
+def infer(args, device, model, model_config, conditioning_tensors, negative_conditioning_tensors, audio):
+    target_sample_rate = int(model_config.get("sample_rate"))
+    sample_size = int(model_config.get("sample_size"))
 
-def trim_audio_inplace(filepath, seconds):
-    audio, sample_rate = torchaudio.load(filepath)
-    num_samples = int(seconds * sample_rate)
-    trimmed_audio = audio[:, :num_samples]
+    seed = args['seed']
+    if seed < 0:
+        # The geniuses at stable-audio didn't realize that 2^32-1 is out of bounds for a signed integer
+        seed = np.random.randint(0, 2**31 - 1)
+    print(f"Using seed: {seed}")
 
-    tmp_out = filepath + ".trimmed.tmp.wav"
-    torchaudio.save(tmp_out, trimmed_audio, sample_rate)
-    os.replace(tmp_out, filepath)
-
-
-def infer(
-    args,
-    audio,
-    conditioning_tensors,
-    device,
-    model,
-    negative_conditioning_tensors,
-    sample_size,
-    seed,
-    target_sample_rate,
-):
     with torch.no_grad():
         output = generate_diffusion_cond(
             model,
-            steps=args["steps"],
-            cfg_scale=args["cfg_scale"],
+            steps=args['steps'],
+            cfg_scale=args['cfg_scale'],
             conditioning_tensors=conditioning_tensors,
             negative_conditioning_tensors=negative_conditioning_tensors,
             init_audio=audio,
+            init_noise_level=args.get("init_noise_level", 1.0),
             sample_size=sample_size,
             sample_rate=target_sample_rate,
-            sampler_type=args["sampler"],
+            sampler_type=args['sampler'],
             device=device,
             sigma_min=0.3,
             sigma_max=500,
@@ -143,100 +156,50 @@ def infer(
         )
     return output
 
-
-def infer_inpaint(
-    args,
-    audio,
-    mask,
-    conditioning_tensors,
-    device,
-    model,
-    negative_conditioning_tensors,
-    sample_size,
-    seed,
-    target_sample_rate,
-):
-    with torch.no_grad():
-        output = generate_diffusion_cond_inpaint(
-            model,
-            steps=args["steps"],
-            cfg_scale=args["cfg_scale"],
-            conditioning_tensors=conditioning_tensors,
-            negative_conditioning_tensors=negative_conditioning_tensors,
-            init_audio=audio,
-            inpaint_audio=audio,
-            inpaint_mask=mask,
-            sample_size=sample_size,
-            sampler_type=args["sampler"],
-            device=device,
-            sigma_min=0.3,
-            sigma_max=500,
-            seed=seed,
-        )
-
-    return output
-
-
-def shared_model_invocation(args, inv_type) -> None:
+def create_model(args):
     project_dir = get_project_dir()
 
-    # Switch between models
-    if args["small"]:
+    if args['small']:
         config_path = (project_dir / STABLE_AUDIO_OPEN_SMALL_PATH) / "model_config.json"
         ckpt_path = (project_dir / STABLE_AUDIO_OPEN_SMALL_PATH) / "model.ckpt"
-        # manually override sampler, since SAO Small only supports pingpong sampler
-        args["sampler"] = "pingpong"
-        args["cfg_scale"] = args.get("cfg_scale", 6.0)
+        args['sampler'] = "pingpong" # sao-small only supports pingpong sampler
+
     else:
         config_path = (project_dir / STABLE_AUDIO_OPEN_1_0_PATH) / "model_config.json"
         ckpt_path = (project_dir / STABLE_AUDIO_OPEN_1_0_PATH) / "model.ckpt"
 
     # If a progress file was indicated, create it to track progress, then delete it on cleanup
-    if args["progress_file"] is not None:
+
+    if args['progress_file'] is not None:
         try:
-            open(args["progress_file"], "w").close()
+            open(args['progress_file'], 'w').close()
         except Exception:
             pass
 
         def _cleanup():
             try:
-                os.remove(args["progress_file"])
+                os.remove(args['progress_file'])
             except OSError:
                 pass
 
         atexit.register(_cleanup)
-        sys.stderr = ProgressWriter(sys.stderr, args["progress_file"])
+        sys.stderr = ProgressWriter(sys.stderr, args['progress_file'])
 
-    # Select device
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    print(f"Using device: {device}", flush=True)
 
-    # Parse the seed if it's present
-    seed = args["seed"]
-    if seed < -1:
-        raise ValueError("Seed must be >= -1")
-    if seed == -1:
-        # The geniuses at stable-audio didn't realize that 2^32-1 is out of bounds for a signed integer
-        seed = np.random.randint(0, 2**31 - 1)
-    print(f"Using seed: {seed}")
 
-    # Load model configuration
-    print(f"Loading model config from {config_path}", flush=True)
     with open(config_path) as f:
         model_config = json.load(f)
 
-    if args["length"] != default_cfg["length"]:
-        model_config["sample_size"] = model_config["sample_rate"] * args["length"]
+    if args['length'] != default_cfg['length']:
+        model_config["sample_size"] = model_config["sample_rate"] * args['length']
 
-    # Instantiate model
-    print("Creating model from config...", flush=True)
-    print(f"Model config's sample_size is {model_config['sample_size']}")
+
+    print(f"Creating model from config {config_path} on device {device}:")
     model = create_model_from_config(model_config)
 
-    # Load weights from local checkpoint
-    print(f"Loading checkpoint from {ckpt_path}", flush=True)
-    state_dict = load_ckpt_state_dict(str(ckpt_path))
-    copy_state_dict(model, state_dict)
+    print(f" - loading weights from {ckpt_path}", flush=True)
+    copy_state_dict(model, load_ckpt_state_dict(str(ckpt_path)))
 
     # Move model to device, set precision, and disable gradients
     model = model.to(device)
@@ -246,200 +209,159 @@ def shared_model_invocation(args, inv_type) -> None:
     for p in model.parameters():
         p.requires_grad = False
 
+    # Warm up GPU allocator
+    if device.type == "cuda": torch.cuda.empty_cache()
+
+    return device, model, model_config
+
+
+def massage_audio(args, device, model_config):
     target_sample_rate = int(model_config.get("sample_rate"))
-    sample_size = int(model_config.get("sample_size"))
 
     n_samples = args["length"] * target_sample_rate
 
     audio2audio_conditioning = None
-    if args["init_audio"] is not None:
-        print(f"Using input audio file '{args['init_audio']}'")
-        in_waveform, in_sample_rate = torchaudio.load(args["init_audio"])
-        in_waveform = in_waveform[..., : int(in_sample_rate * args["length"])]
+
+    if args['init_audio'] is not None:
+        in_waveform, in_sample_rate = torchaudio.load(args['init_audio'])
+        in_waveform = in_waveform[..., : in_sample_rate * args['length']]
         if in_sample_rate != target_sample_rate:
-            print(
-                f"Resampling input audio from sample rate {in_sample_rate} to {target_sample_rate}..."
-            )
-            resampler = torchaudio.transforms.Resample(
-                orig_freq=in_sample_rate, new_freq=target_sample_rate
-            )
+            print(f"Resampling input audio from sample rate {in_sample_rate} to {target_sample_rate}")
+            resampler = torchaudio.transforms.Resample(orig_freq=in_sample_rate, new_freq=target_sample_rate)
+
             in_waveform = resampler(in_waveform)
             in_sample_rate = target_sample_rate
-            print("...done resampling")
+            print(" - done")
         in_waveform = in_waveform.to(device)
         if device.type == "cuda":
-            print("Converting input audio to 16-bit...")
+            print("Converting input audio to 16-bit")
             in_waveform = in_waveform.half()
-            print("...done converting")
+            print(" - done")
         audio2audio_conditioning = (in_sample_rate, in_waveform)
+    return audio2audio_conditioning
 
-    # Warm up GPU allocator
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
 
-    conditioning_tensors = None
+def unstack_tensor(device, model, length, t):
+    prompt = t.pop()
+    conditioning = [{
+        "prompt": prompt,
+        "seconds_start": 0,
+        "seconds_total": length,
+    }]
+    conditioning_tensors = model.conditioner(conditioning, device)["prompt"][0]
+    t.insert(0, conditioning_tensors)
+
+
+def standard_tensors(args, device, model):
     negative_conditioning_tensors = None
 
-    output = None
-    match inv_type:
-        case InvocationType.SPROMPT:
-            conditioning = [
-                {
-                    "prompt": args["prompt"],
-                    "seconds_start": 0,
-                    "seconds_total": args["length"],
-                }
-            ]
-            conditioning_tensors = model.conditioner(conditioning, device)
+    def condition(prompt, length, model, device):
+        return model.conditioner([{"prompt": prompt, "seconds_start": 0, "seconds_total": length}], device)
 
-            negative_conditioning = None
-            if args["negative_prompt"] is not None:
-                negative_conditioning = [
-                    {
-                        "prompt": args["negative_prompt"],
-                        "seconds_start": 0,
-                        "seconds_total": args["length"],
-                    }
-                ]
-                negative_conditioning_tensors = model.conditioner(negative_conditioning, device)
+    conditioning_tensors = condition(args["prompt"], args["length"], model, device)
+    if args['negative_prompt'] is not None:
+        negative_conditioning_tensors = condition(args["negative_prompt"], args["length"], model, device)
 
-            print(f"Generating {args['length']}s audio with {args['steps']} steps and cfg_scale={args['cfg_scale']}...", flush=True)
-            output = infer(
-                args,
-                audio2audio_conditioning,
-                conditioning_tensors,
-                device,
-                model,
-                negative_conditioning_tensors,
-                sample_size,
-                seed,
-                target_sample_rate,
-            )
-
-        case InvocationType.NPROMPT | InvocationType.INPAINT:
-            uncond_spec = [{"prompt": "", "seconds_start": 0, "seconds_total": args["length"]}]
-            uncond_tensors_batched = model.conditioner(uncond_spec, device)
-            uncond_negative_tensors_batched = model.conditioner(uncond_spec, device)
-
-            # Initialize a zero tensor with the correct shape and device for the sum
-            prompt_embedding_template = uncond_tensors_batched["prompt"][0]
-            prompt_embedding_template = torch.zeros_like(prompt_embedding_template)
-
-            # Iterate through prompts and their weights
-            for elem in args["prompts"]:
-                prompt_text = elem["prompt"]
-                weight = elem["weight"]
-                if weight == 0:
-                    continue
-
-                current_prompt_spec = [
-                    {"prompt": prompt_text, "seconds_start": 0, "seconds_total": args["length"]}
-                ]
-                current_cond_tensor = model.conditioner(current_prompt_spec, device)["prompt"][0]
-
-                prompt_embedding_template += weight * current_cond_tensor
-
-            uncond_tensors_batched["prompt"] = (
-                prompt_embedding_template,
-                uncond_tensors_batched["prompt"][1],
-            )
-            conditioning_tensors = uncond_tensors_batched
-
-            if args.get("neg_prompts") is not None:
-                negative_prompt_embedding_template = uncond_tensors_batched["prompt"][0]
-                negative_prompt_embedding_template = torch.zeros_like(
-                    negative_prompt_embedding_template
-                )
-
-                for elem in args["neg_prompts"]:
-                    prompt_text = elem["prompt"]
-                    weight = elem["weight"]
-                    if weight == 0:
-                        continue
-
-                    current_prompt_spec = [
-                        {"prompt": prompt_text, "seconds_start": 0, "seconds_total": args["length"]}
-                    ]
-                    current_cond_tensor = model.conditioner(current_prompt_spec, device)["prompt"][
-                        0
-                    ]
-
-                    negative_prompt_embedding_template += weight * current_cond_tensor
-
-                uncond_negative_tensors_batched["prompt"] = (
-                    negative_prompt_embedding_template,
-                    uncond_negative_tensors_batched["prompt"][1],
-                )
-                negative_conditioning_tensors = uncond_negative_tensors_batched
-
-            if inv_type == InvocationType.INPAINT:
-                print(f"Inpainting {args['init_audio']} with {args['steps']} steps and cfg_scale={args['cfg_scale']}...", flush=True)
-
-                inpaint_mask = torch.ones(1, sample_size, device=device)
-                for _slice_name, time_range_seconds in args["inpaint"].items():
-                    start_sec, end_sec = time_range_seconds
-
-                    start_sample = int(start_sec * target_sample_rate)
-                    end_sample = int(end_sec * target_sample_rate)
-
-                    # Clamp to audio bounds and ensure valid range
-                    start_sample = max(0, start_sample)
-                    end_sample = min(n_samples, end_sample)
-
-                    if start_sample < end_sample:
-                        inpaint_mask[start_sample:end_sample] = 0
-
-                output = infer_inpaint(
-                    args,
-                    audio2audio_conditioning,
-                    inpaint_mask,
-                    conditioning_tensors,
-                    device,
-                    model,
-                    negative_conditioning_tensors,
-                    sample_size,
-                    seed,
-                    target_sample_rate,
-                )
-
-            else:
-                print(
-                    f"Generating {args['length']}s audio with {args['steps']} steps and cfg_scale={args['cfg_scale']}...", flush=True
-                )
-                output = infer(
-                    args,
-                    audio2audio_conditioning,
-                    conditioning_tensors,
-                    device,
-                    model,
-                    negative_conditioning_tensors,
-                    sample_size,
-                    seed,
-                    target_sample_rate,
-                )
-
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
-
-    # Reshape and normalize to PCM16
-    audio = rearrange(output, "b d n -> d (b n)")
-    audio = audio.to(torch.float32)
-    audio = audio.div(torch.max(torch.abs(audio))).clamp(-1, 1)
-    audio = audio.mul(32767).to(torch.int16).cpu()
-
-    # Save output
-    torchaudio.save(args["output"], audio, target_sample_rate)
-    print(f"Saved audio to {args['output']}", flush=True)
-
-    trim_audio_inplace(args["output"], args["length"])
+    return conditioning_tensors, negative_conditioning_tensors
 
 
-def simple_prompt() -> None:
-    # Some logic here describes how the args struct is created;
-    # Either we had a .saudio invocation or a ```toml invocation
-    parser = argparse.ArgumentParser(description="Generate audio with Stable Audio Open 1.0")
+def sum_tensors(args, device, model):
+    negative_conditioning_tensors = None
+
+    def sum_over_prompts(prompts, length, device, model):
+        # Target starts its life as unconditioned generation. This is, for some reason, fine.
+        target = model.conditioner(
+            [{"prompt": "", "seconds_start": 0, "seconds_total": length}],
+            device)
+        sum = torch.zeros_like(target['prompt'][0])
+
+        for elem in prompts:
+            prompt_text = elem['prompt']
+            weight = elem['weight']
+            if weight == 0:
+                continue
+
+            sum += (weight * model.conditioner([{"prompt": prompt_text, "seconds_start": 0, "seconds_total": args['length']}], device)['prompt'][0])
+
+        # continuous_transformer does not ***CURRENTLY*** support attention masks, so we use the unconditional diffusion mask.
+        # If this shit breaks after updating the model, now you know why.
+        target['prompt'] = (sum, torch.ones_like(target['prompt'][1]))
+        return target
+
+    conditioning_tensors = sum_over_prompts(args['prompts'], args['length'], device, model)
+
+    if args.get('negative_prompts', None) is not None:
+        negative_conditioning_tensors = sum_over_prompts(args['negative_prompts'], args['length'], device, model)
+
+    if args.get('normalize_embeddings', False):
+        conditioning_tensors = np.divide(conditioning_tensors, len(args['prompts']))
+        if negative_conditioning_tensors is not None:
+            negative_conditioning_tensors = np.divide(negative_conditioning_tensors, len(args['negative_prompts']))
+
+    return conditioning_tensors, negative_conditioning_tensors
+
+
+def freaky_tensors(args, device, model):
+    eval_prompt = partial(unstack_tensor, device, model, args['length'])
+
+    def expr2tensor(prompt):
+        exprStack[:] = []
+        try:
+            results = BNF(eval_prompt).parseString(prompt, parseAll=True)
+            val = evaluate_stack(exprStack[:])
+        except ParseException as pe:
+            print(prompt, "failed parse:", str(pe))
+            exit(1)
+        return val
+
+    negative_conditioning_tensors = None
+
+    uncond_spec = [{"prompt": "", "seconds_start": 0, "seconds_total": args['length']}]
+    uncond_tensors = model.conditioner(uncond_spec, device)
+    uncond_tensors['prompt'] = (expr2tensor(args['eprompt']), uncond_tensors['prompt'][1])
+    conditioning_tensors = uncond_tensors
+
+    if args.get('enegative_prompt', None) is not None:
+        uncond_negative_tensors = model.conditioner(uncond_spec, device)
+        uncond_negative_tensors['prompt'] = (expr2tensor(args['eprompt']), uncond_tensors['prompt'][1])
+        negative_conditioning_tensors = uncond_negative_tensors
+
+    return conditioning_tensors, negative_conditioning_tensors
+
+def toml_prompt():
+    input = stdin.read()
+    toml = loads(input)
+    args = default_cfg
+    if toml['config'] is not None:
+        args = default_cfg | toml['config']
+
+    prompts = toml.get('prompts', None)
+    if prompts is None:
+        return {}
+
+    if prompts.get('eprompt', None) is not None:
+        args['eprompt'] = prompts['eprompt']
+    else:
+        prompts = [{'prompt': k, 'weight': v} for k, v in prompts.items()]
+        args['prompts'] = prompts
+
+    negative_prompts = toml.get('negative_prompts', None)
+    if negative_prompts is not None:
+        if negative_prompts.get('eprompt', None) is not None:
+            args['enegative_prompt'] = negative_prompts['eprompt']
+        else:
+            negative_prompts = [{'prompt': k, 'weight': v} for k, v in negative_prompts.items()]
+            args['negative_prompts'] = negative_prompts
+
+    args['inpaint'] = toml.get('inpaint', None)
+    return args
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate audio with Stable Audio Open 1.0"
+    )
     # Move defaults into the default dict
-    parser.add_argument("--prompt", required=True, help="Text prompt for audio generation")
+    parser.add_argument("--prompt", help="Text prompt for audio generation")
     parser.add_argument("--negative_prompt", help="Negative prompt for audio generation")
     parser.add_argument("--output", help="Output WAV file path")
     parser.add_argument("--length", type=float, help="Length in seconds")
@@ -448,79 +370,47 @@ def simple_prompt() -> None:
     parser.add_argument("--sampler", help="Sampler type")
     parser.add_argument("--progress_file", help="File to write progress output to")
     parser.add_argument("--init_audio", help="Path to a WAV file to condition on (audio2audio)")
-    parser.add_argument(
-        "--seed", type=int, help="Integer seed used for randomness in audio generation"
-    )
-    parser.add_argument(
-        "--small", action="store_true", help="If set, uses the small version of Stable Audio Open"
-    )
+    parser.add_argument("--seed", type=int, help="Integer seed used for randomness in audio generation")
+    parser.add_argument("--small", action="store_true", help="If set, uses the small version of Stable Audio Open")
+    parser.add_argument("--eprompt", type=str, help="Prompt expression")
+    parser.add_argument("--enegative_prompt", type=str, help="Negative prompt expression")
+    parser.add_argument("--toml", action="store_true", help="Provide config as a TOML file to stdin")
     args = parser.parse_args().__dict__
-    args = {
-        **default_cfg,
-        **{k: v for k, v1 in args.items() if (v := v1) is not None},
-    }  # Overwrite default vals when specified
+    args = {**default_cfg, **{k: v for k, v1 in args.items() if (v := v1) is not None}} # Overwrite default vals when specified
+    args['cfg_scale'] = 7.0 if args['init_audio'] is None and args['cfg_scale'] == 7.0 else 150.0
+    toml = args.get('toml', False)
+    if toml:
+        args = toml_prompt()
 
-    if args["init_audio"] is not None and args["cfg_scale"] == parser.get_default("cfg_scale"):
-        args["cfg_scale"] = 125.0
+    if args.get('prompt', None) is None and args.get('prompts', None) is None and args.get('eprompt', None) is None:
+        raise ValueError("Promptism :^)")
 
-    # args["cfg_scale"] = args["strength"]
-    # args["cfg_scale"] = args["strength"] if args["init_audio"] is None else 150.0
+    device, model, model_config = create_model(args)
 
-    shared_model_invocation(args, InvocationType.SPROMPT)
+    audio_cond = None
+    if args.get('init_audio', False):
+        audio_cond = massage_audio(args, device, model_config)
 
+    pe, npe = None, None
+    if args.get('prompt', None) is not None:
+        pe, npe = standard_tensors(args, device, model)
+    elif args.get('eprompt', None) is not None:
+        pe, npe = freaky_tensors(args, device, model)
+    elif args.get('prompts', None) is not None:
+        pe, npe = sum_tensors(args, device, model)
 
-def toml_prompt() -> None:
-    parser = argparse.ArgumentParser(description="Generate audio with Stable Audio Open 1.0")
-    parser.add_argument("--output", type=str, default="", help="Output WAV file path")
-    parser.add_argument("--progress_file", type=str, default="", help="File to write progress output to")
-    parser.add_argument("--init_audio", type=str, default="", help="Path to a WAV file to condition on (audio2audio)")
-    parser.add_argument("--toml", action="store_true", help="Read TOML from stdin")
-    args_in = parser.parse_args().__dict__
-    try:
-        input = stdin.read()
-        toml = loads(input)
-        args = default_cfg
-        if toml.get("config") is not None:
-            args = default_cfg | toml["config"]
-
-        print("got TOML: ")
-        print(toml)
-        prompts = toml.get("prompts", None)
-        if prompts is None:
-            print("No prompts received. Exiting...")
-            exit(1)
-        prompts = [{"prompt": k, "weight": v} for k, v in prompts.items()]
-        args["prompts"] = prompts
-
-        if args_in.get("output"):
-            args["output"] = args_in.get("output")
-        if args_in.get("progress_file"):
-            args["progress_file"] = args_in.get("progress_file")
-        if args_in.get("init_audio"):
-            args["init_audio"] = args_in.get("init_audio")
-
-        neg_prompts = toml.get("neg_prompts", None)
-        if neg_prompts is not None:
-            neg_prompts = [{"prompt": k, "weight": v} for k, v in neg_prompts.items()]
-            args["neg_prompts"] = neg_prompts
-
-        args["inpaint"] = toml.get("inpaint", None)
+    output = infer(args, device, model, model_config, pe, npe, audio_cond)
 
 
-        shared_model_invocation(
-            args, InvocationType.NPROMPT if args["inpaint"] is None else InvocationType.INPAINT
-        )
-    except tomllib.TOMLDecodeError as e:
-        print(f"rain into TOML decode error: {e}")
+    # Reshape and normalize to PCM16
+    audio = rearrange(output, "b d n -> d (b n)")
+    audio = audio.to(torch.float32)
+    audio = audio.div(torch.max(torch.abs(audio))).clamp(-1, 1) #???
+    audio = audio.mul(32767).to(torch.int16).cpu()
 
-
-def main() -> None:
-    # if there's something on stdin, assume it's a TOML prompt
-    if "--toml" in sys.argv:
-        print("Using !!!TOML PROMPT!!! !!!EXPERIMENTAL!!!")
-        toml_prompt()
-    else:
-        simple_prompt()
+    # Save output
+    torchaudio.save(args['output'], audio, model_config.get("sample_rate"))
+    print(f"Saved audio to {args['output']}", flush=True)
 
 
 if __name__ == "__main__":
