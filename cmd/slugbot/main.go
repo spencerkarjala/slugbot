@@ -19,17 +19,23 @@ import (
 	"slugbot/internal/io/slog"
 )
 
-// Create mapping from command strings to factory functions for each command type
-var commandHandlers = map[string]func() commands.CommandHandler{
-	"arc":       func() commands.CommandHandler { return &image.ArcDistortCommand{} },
-	"barrel":    func() commands.CommandHandler { return &image.BarrelDistortCommand{} },
-	"ibarrel":   func() commands.CommandHandler { return &image.InverseBarrelDistortCommand{} },
-	"polar":     func() commands.CommandHandler { return &image.PolarDistortCommand{} },
-	"ipolar":    func() commands.CommandHandler { return &image.InversePolarDistortCommand{} },
-	".saudio":   func() commands.CommandHandler { return &audio.StableAudioCommand{} },
-	"```saudio": func() commands.CommandHandler { return &audio.StableAudioWithConfigCommand{} },
-	"```toml":   func() commands.CommandHandler { return &audio.StableAudioWithConfigCommand{} },
-	".slimit":   func() commands.CommandHandler { return &audio.LimitCommand{} },
+// Top-level commands such as `.saudio` or `.slimit`
+var topCommandHandlers = map[string]func(*discordgo.Session, *discordgo.MessageCreate) error{
+	".sim":      handleDotSim,
+	".saudio":   handleDotSaudio,
+	".saudiosm": handleDotSaudio,
+	"```saudio": handleDotSaudioConfig,
+	"```toml":   handleDotSaudioConfig,
+	".slimit":   handleDotSlimit,
+}
+
+// Subcommands for `.sim`
+var simCommandHandlers = map[string]func() commands.CommandHandler{
+	"arc":     func() commands.CommandHandler { return &image.ArcDistortCommand{} },
+	"barrel":  func() commands.CommandHandler { return &image.BarrelDistortCommand{} },
+	"ibarrel": func() commands.CommandHandler { return &image.InverseBarrelDistortCommand{} },
+	"polar":   func() commands.CommandHandler { return &image.PolarDistortCommand{} },
+	"ipolar":  func() commands.CommandHandler { return &image.InversePolarDistortCommand{} },
 }
 
 const usage = `Usage: .saudio [flags] <prompt words>
@@ -80,7 +86,7 @@ func UpdateQueueViewCallback(view *exec.TaskQueueView) {
 
 func getCommandList() string {
 	var keys []string
-	for key := range commandHandlers {
+	for key := range simCommandHandlers {
 		keys = append(keys, "`"+key+"`")
 	}
 	return strings.Join(keys, ", ")
@@ -95,119 +101,102 @@ func messageCreateHandler(session *discordgo.Session, message *discordgo.Message
 	if len(content) < 1 {
 		return
 	}
-
 	parts := strings.Fields(message.Content)
 
-	if parts[0] != ".sim" && parts[0] != ".saudio" && parts[0] != ".saudiosm" && parts[0] != ".slimit" && parts[0] != "```saudio" && parts[0] != "```toml" {
-		return
-	}
-
-	if parts[0] == ".imagine" {
-		return
-	}
-
-	if parts[0] == ".saudio" || parts[0] == ".saudiosm" {
-		commandConstructor, ok := commandHandlers[".saudio"]
-		if !ok {
-			session.ChannelMessageSend(message.ChannelID, "Error occured while processing .saudio prompt")
-			return
-		}
-		command := commandConstructor()
-		command.SetContext(session, message)
-
-		// need to validate input before we can save the prompt
-		if err := command.Validate(); err != nil {
-			session.ChannelMessageSend(message.ChannelID, command.Usage())
-			slog.Error("couldn't validate Stable Audio command: %v", err)
-			return
-		}
-
-		// command should be an audio-generation command, so leave if it's not Promptable
-		stableAudioCommand, ok := command.(*audio.StableAudioCommand)
-		if !ok {
-			slog.Fatal("somehow created a non-Stable-Audio command from .saudio prompt")
-			return
-		}
-
-		// finally, set the prompt
-		parts = append(parts, "--small")
-		stableAudioCommand.SetPrompt(strings.Join(parts[1:], " "))
-
-		if slices.Contains(parts, "--help") || slices.Contains(parts, "-h") || slices.Contains(parts, "--usage") {
-			session.ChannelMessageSend(message.ChannelID, "```\n"+usage+"\n```")
-			return
-		}
-
-		if audioQueueView == nil {
-			audioQueueView := *exec.NewTaskQueueView(&audioQueue, session, message.ChannelID)
-			go UpdateQueueViewCallback(&audioQueueView)
-		}
-
-		audioQueue.Enqueue(stableAudioCommand)
-		return
-	}
-
-	if parts[0] == "```saudio" || parts[0] == "```toml" {
-		commandConstructor, ok := commandHandlers["```saudio"]
-		if !ok {
-			session.ChannelMessageSend(message.ChannelID, "Error occured while processing .saudio prompt")
-			return
-		}
-		command := commandConstructor()
-		command.SetContext(session, message)
-
-		if audioQueueView == nil {
-			audioQueueView := *exec.NewTaskQueueView(&audioQueue, session, message.ChannelID)
-			go UpdateQueueViewCallback(&audioQueueView)
-		}
-
-		stableAudioCommand, ok := command.(*audio.StableAudioWithConfigCommand)
-		if !ok {
-			slog.Fatal("somehow created a non-Stable-Audio command from ```saudio prompt")
-			return
-		}
-
-		audioQueue.Enqueue(stableAudioCommand)
-		return
-	}
-
-	if parts[0] == ".slimit" {
-		commandConstructor, ok := commandHandlers[".slimit"]
-		if !ok {
-			session.ChannelMessageSend(message.ChannelID, "Error occurred while processing .slimit prompt")
-			return
-		}
-		command := commandConstructor()
-		command.SetContext(session, message)
-
-		slimitCommand, ok := command.(*audio.LimitCommand)
-		if !ok || slimitCommand == nil {
-			slog.Fatal("somehow created a non-limit command from .slimit prompt")
-			return
-		}
-
-		slog.Info("applying .slimit command...")
-		slimitCommand.Apply()
-		return
-	}
-
+	// if it doesn't have at least a top level command + argument, ignore it
 	if len(parts) < 2 {
-		session.ChannelMessageSend(message.ChannelID, "Usage: .sim <word>")
 		return
 	}
 
+	// if it doesn't start with a registered command, ignore it
+	topCommandHandler, ok := topCommandHandlers[parts[0]]
+	if !ok {
+		return
+	}
+
+	err := topCommandHandler(session, message)
+	if err != nil {
+		slog.Error("Command handler failed with error: %w", err)
+		session.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Received error while executing command: %v", err))
+	}
+}
+
+func handleDotSim(session *discordgo.Session, message *discordgo.MessageCreate) error {
+	if len(strings.TrimSpace(message.Content)) < 1 {
+		return fmt.Errorf("tried to handle .sim command without any message content")
+	}
+	parts := strings.Fields(message.Content)
 	commandString := parts[1]
-	commandConstructor, ok := commandHandlers[commandString]
+	commandConstructor, ok := simCommandHandlers[commandString]
 	if !ok {
 		session.ChannelMessageSend(message.ChannelID, "Received unknown command '`"+commandString+"`'; must be one of '"+getCommandList()+"'")
-		return
+		return nil
 	}
 
 	command := commandConstructor()
 	command.SetContext(session, message)
 	if err := command.Apply(); err != nil {
-		session.ChannelMessageSend(message.ChannelID, "Error occurred while processing: "+err.Error())
+		return err
 	}
+
+	slog.Info("applying .sim command...")
+	return nil
+}
+
+func handleDotSaudio(session *discordgo.Session, message *discordgo.MessageCreate) error {
+	command := &audio.StableAudioCommand{}
+	command.SetContext(session, message)
+
+	// need to validate input before we can save the prompt
+	if err := command.Validate(); err != nil {
+		session.ChannelMessageSend(message.ChannelID, command.Usage())
+		reported_err := fmt.Errorf("couldn't validate Stable Audio command: %v", err)
+		slog.Error(reported_err)
+		return reported_err
+	}
+
+	parts := strings.Fields(message.Content)
+
+	// finally, set the prompt
+	parts = append(parts, "--small")
+	command.SetPrompt(strings.Join(parts[1:], " "))
+
+	if slices.Contains(parts, "--help") || slices.Contains(parts, "-h") || slices.Contains(parts, "--usage") {
+		session.ChannelMessageSend(message.ChannelID, "```\n"+usage+"\n```")
+		return nil
+	}
+
+	if audioQueueView == nil {
+		audioQueueView := *exec.NewTaskQueueView(&audioQueue, session, message.ChannelID)
+		go UpdateQueueViewCallback(&audioQueueView)
+	}
+
+	slog.Info("applying saudio command...")
+	audioQueue.Enqueue(command)
+	return nil
+}
+
+func handleDotSaudioConfig(session *discordgo.Session, message *discordgo.MessageCreate) error {
+	command := &audio.StableAudioWithConfigCommand{}
+	command.SetContext(session, message)
+
+	if audioQueueView == nil {
+		audioQueueView := *exec.NewTaskQueueView(&audioQueue, session, message.ChannelID)
+		go UpdateQueueViewCallback(&audioQueueView)
+	}
+
+	slog.Info("applying saudio w/ config command...")
+	audioQueue.Enqueue(command)
+	return nil
+}
+
+func handleDotSlimit(session *discordgo.Session, message *discordgo.MessageCreate) error {
+	command := &audio.LimitCommand{}
+	command.SetContext(session, message)
+
+	slog.Info("applying .slimit command...")
+	command.Apply()
+	return nil
 }
 
 func loadDiscordToken() (string, error) {
@@ -227,11 +216,13 @@ func loadDiscordToken() (string, error) {
 }
 
 func main() {
+	slog.SetLevel(slog.LevelTrace)
+
 	token, err := loadDiscordToken()
 	if err != nil {
 		slog.Error("error loading Discord token, ", err)
+		return
 	}
-	slog.SetLevel(slog.LevelTrace)
 
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
