@@ -31,11 +31,12 @@ var topCommandHandlers = map[string]func(*discordgo.Session, *discordgo.MessageC
 
 // Subcommands for `.sim`
 var simCommandHandlers = map[string]func() commands.CommandHandler{
-	"arc":     func() commands.CommandHandler { return &image.ArcDistortCommand{} },
-	"barrel":  func() commands.CommandHandler { return &image.BarrelDistortCommand{} },
-	"ibarrel": func() commands.CommandHandler { return &image.InverseBarrelDistortCommand{} },
-	"polar":   func() commands.CommandHandler { return &image.PolarDistortCommand{} },
-	"ipolar":  func() commands.CommandHandler { return &image.InversePolarDistortCommand{} },
+	"arc":       func() commands.CommandHandler { return &image.ArcDistortCommand{} },
+	"barrel":    func() commands.CommandHandler { return &image.BarrelDistortCommand{} },
+	"ibarrel":   func() commands.CommandHandler { return &image.InverseBarrelDistortCommand{} },
+	"polar":     func() commands.CommandHandler { return &image.PolarDistortCommand{} },
+	"ipolar":    func() commands.CommandHandler { return &image.InversePolarDistortCommand{} },
+	"genframes": func() commands.CommandHandler { return &image.GenFramesCommand{} },
 }
 
 const usage = `Usage: .saudio [flags] <prompt words>

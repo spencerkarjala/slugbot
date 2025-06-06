@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
+	"slugbot/internal/io/slog"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -104,17 +106,43 @@ func GetImageReference(session *discordgo.Session, message *discordgo.MessageCre
 	return "", fmt.Errorf("couldn't any images in recent chat history")
 }
 
-func UploadImage(session *discordgo.Session, channelID, filename string) error {
-	file, err := os.Open(filename)
+func UploadImage(session *discordgo.Session, channelID, pathToImage string) error {
+	file, err := os.Open(pathToImage)
 	if err != nil {
 		return fmt.Errorf("failed to open file for uploading: %w", err)
 	}
 	defer file.Close()
 
-	_, err = session.ChannelFileSend(channelID, "processed.jpg", file)
+	filename := filepath.Base(pathToImage)
+
+	slog.Trace(fmt.Sprintf("Creating embed for image '%s'.", filename))
+
+	embed := &discordgo.MessageEmbed{
+		Title: "eeefffaaaa",
+		Image: &discordgo.MessageEmbedImage{
+			URL: fmt.Sprintf("attachment://%s", filename),
+		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "eee",
+		},
+	}
+
+	messageSend := &discordgo.MessageSend{
+		Embeds: []*discordgo.MessageEmbed{embed},
+		Files: []*discordgo.File{
+			{
+				Name:   filename,
+				Reader: file,
+			},
+		},
+	}
+
+	_, err = session.ChannelMessageSendComplex(channelID, messageSend)
 	if err != nil {
 		return fmt.Errorf("failed to send file to discord: %w", err)
 	}
+
+	slog.Info(fmt.Sprintf("Successfully uploaded image %s to discord.", pathToImage))
 
 	return nil
 }
